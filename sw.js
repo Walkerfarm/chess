@@ -4,8 +4,7 @@ const ASSETS = [
   "./index.html",
   "./manifest.webmanifest",
   "./sw.js",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  
 ];
 
 self.addEventListener("install", (e) => {
@@ -29,3 +28,4 @@ self.addEventListener("fetch", (e) => {
     caches.match(e.request).then((cached) => cached || fetch(e.request))
   );
 });
+
