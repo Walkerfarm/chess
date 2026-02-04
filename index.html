@@ -3,32 +3,27 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Chess vs Bot</title>
-
-  <!-- PWA -->
-  <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#0f1220">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Chess vs Bot">
-
-  <!-- Optional iOS icon (add files if you want) -->
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Chess vs Bot (No Layout Shift)</title>
 
   <style>
-    html { overflow-y: scroll; }
+    /* ---------- NO LAYOUT SHIFT GUARANTEES ---------- */
+    html { overflow-y: scroll; } /* reserve scrollbar width always (desktop) */
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin:0; }
+    /* ------------------------------------------------ */
 
     :root{
       --light:#f0d9b5;
       --dark:#b58863;
       --sel:#3aa1ff;
-      --hint:#7ad67a;
       --panel:#1f2430;
       --text:#e7eaf0;
       --bg:#0f1220;
-      --gap:14px;
+
+      /* These get set by JS to exact integer pixels */
+      --board: 520px;
+      --sq: 65px;
+      --gap: 14px;
     }
 
     body{
@@ -36,13 +31,16 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding: calc(env(safe-area-inset-top) + 14px) calc(env(safe-area-inset-right) + 14px)
-               calc(env(safe-area-inset-bottom) + 14px) calc(env(safe-area-inset-left) + 14px);
+      padding:
+        calc(env(safe-area-inset-top) + 14px)
+        calc(env(safe-area-inset-right) + 14px)
+        calc(env(safe-area-inset-bottom) + 14px)
+        calc(env(safe-area-inset-left) + 14px);
       display:flex;
       justify-content:center;
     }
 
-    /* Responsive layout: column on phone, row on desktop */
+    /* Desktop: row. Phone: column. */
     .wrap{
       width: min(1100px, 100%);
       display:flex;
@@ -50,55 +48,58 @@
       align-items:flex-start;
       flex-direction: column;
     }
-
     @media (min-width: 900px){
-      .wrap{ flex-direction: row; }
+      .wrap{ flex-direction: row; flex-wrap: nowrap; }
     }
 
-    /* Board sizing:
-       - On phones: fit to screen width
-       - On desktop: cap at 520px
-    */
+    /* Fixed board size driven by JS (integer px -> no rounding jitter) */
     .board{
-      width: min(92vw, 520px);
-      aspect-ratio: 1 / 1;
+      width: var(--board);
+      height: var(--board);
       display:grid;
-      grid-template-columns: repeat(8, 1fr);
+      grid-template-columns: repeat(8, var(--sq));
+      grid-template-rows: repeat(8, var(--sq));
       border: 2px solid rgba(255,255,255,.15);
       border-radius: 12px;
       overflow:hidden;
       box-shadow: 0 18px 50px rgba(0,0,0,.45);
       user-select:none;
-      touch-action: manipulation; /* avoids double-tap zoom delays */
-      flex: 0 0 auto;
+      touch-action: manipulation;
+      flex: 0 0 auto; /* never shrink */
     }
 
     .sq{
+      width: var(--sq);
+      height: var(--sq);
       display:flex;
       align-items:center;
       justify-content:center;
       cursor:pointer;
       position:relative;
-      font-size: clamp(28px, 7vw, 44px);
+      font-size: calc(var(--sq) * 0.68);
       line-height: 1;
-      font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "Apple Symbols", system-ui, sans-serif;
+      font-family: "Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",system-ui,sans-serif;
     }
 
     .light{ background: var(--light); color:#111; }
     .dark{ background: var(--dark); color:#111; }
 
     .sq.sel{ outline: 4px solid var(--sel); outline-offset:-4px; }
+
+    /* move hints */
     .sq.hint::after{
       content:"";
-      width: 16px; height:16px;
+      width: calc(var(--sq) * 0.22);
+      height: calc(var(--sq) * 0.22);
       background: rgba(0,0,0,.25);
       border-radius: 50%;
       position:absolute;
     }
     .sq.cap::after{
       content:"";
-      width: 46px; height:46px;
-      border: 4px solid rgba(0,0,0,.28);
+      width: calc(var(--sq) * 0.70);
+      height: calc(var(--sq) * 0.70);
+      border: calc(var(--sq) * 0.06) solid rgba(0,0,0,.28);
       border-radius: 50%;
       position:absolute;
       box-sizing:border-box;
@@ -140,10 +141,10 @@
       border-radius: 12px;
       padding: 14px;
       box-shadow: 0 18px 50px rgba(0,0,0,.35);
+      flex: 0 0 auto;
     }
-
     @media (min-width: 900px){
-      .panel{ width: 360px; }
+      .panel{ width: 360px; flex: 0 0 360px; }
     }
 
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -172,6 +173,7 @@
       white-space:pre-wrap;
     }
 
+    /* IMPORTANT: always show scroll gutter to prevent width changes */
     .moves{
       margin-top:10px;
       padding:10px 12px;
@@ -179,8 +181,8 @@
       border:1px solid rgba(255,255,255,.10);
       border-radius:10px;
       max-height: 240px;
-      overflow-y: auto;
-      scrollbar-gutter: stable;
+      overflow-y: scroll;          /* always reserve scrollbar space */
+      scrollbar-gutter: stable;    /* modern browsers */
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px;
       line-height:1.4;
@@ -199,55 +201,71 @@
     }
   </style>
 </head>
+
 <body>
-<div class="wrap">
-  <div>
-    <div id="board" class="board" aria-label="Chess board"></div>
-    <div class="small" style="margin-top:10px; opacity:.85;">
-      Tap piece → tap destination. You are White. Bot is Black.
+  <div class="wrap">
+    <div>
+      <div id="board" class="board" aria-label="Chess board"></div>
+      <div class="small" style="margin-top:10px; opacity:.85;">
+        Tap/click piece → tap/click destination. You are White. Bot is Black.
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button id="newBtn">New Game</button>
+        <button id="undoBtn">Undo</button>
+        <button id="flipBtn">Flip Board</button>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <span class="tag">Bot strength:
+          <select id="depthSel">
+            <option value="1">Very Easy (Depth 1)</option>
+            <option value="2" selected>Easy (Depth 2)</option>
+            <option value="3">Medium (Depth 3)</option>
+            <option value="4">Hard (Depth 4)</option>
+          </select>
+        </span>
+        <span class="tag">Bot:
+          <select id="botOnSel">
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </span>
+      </div>
+
+      <div class="status" id="status"></div>
+      <div class="moves" id="moves"></div>
+
+      <div class="small" style="margin-top:10px;">
+        Layout is locked: integer-pixel squares + stable scrollbars.
+      </div>
     </div>
   </div>
-
-  <div class="panel">
-    <div class="row">
-      <button id="newBtn">New Game</button>
-      <button id="undoBtn">Undo</button>
-      <button id="flipBtn">Flip Board</button>
-    </div>
-
-    <div class="row" style="margin-top:10px;">
-      <span class="tag">Bot strength:
-        <select id="depthSel">
-          <option value="1">Very Easy (Depth 1)</option>
-          <option value="2" selected>Easy (Depth 2)</option>
-          <option value="3">Medium (Depth 3)</option>
-          <option value="4">Hard (Depth 4)</option>
-        </select>
-      </span>
-      <span class="tag">Bot:
-        <select id="botOnSel">
-          <option value="on" selected>On</option>
-          <option value="off">Off</option>
-        </select>
-      </span>
-    </div>
-
-    <div class="status" id="status"></div>
-    <div class="moves" id="moves"></div>
-
-    <div class="small" style="margin-top:10px;">
-      PWA: open the site on iPhone → Share → Add to Home Screen.
-    </div>
-  </div>
-</div>
 
 <script>
 (() => {
-  // Register service worker (PWA offline caching)
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+  /* ======= HARD FIX: integer-pixel board sizing (prevents rounding jitter) ======= */
+  function setBoardSize(){
+    // Available width inside body padding. Use 92vw-ish but keep integer multiple of 8.
+    const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
+    const vh = Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight);
+
+    // On phones, keep it under viewport height so panel is still visible. On desktop, cap 520.
+    const target = Math.min(520, Math.floor(vw * 0.92), Math.floor(vh * 0.62));
+    const board = Math.max(240, Math.floor(target / 8) * 8); // multiple of 8
+    const sq = board / 8;
+
+    document.documentElement.style.setProperty("--board", board + "px");
+    document.documentElement.style.setProperty("--sq", sq + "px");
   }
 
+  setBoardSize();
+  window.addEventListener("resize", setBoardSize, {passive:true});
+  window.addEventListener("orientationchange", () => setTimeout(setBoardSize, 50), {passive:true});
+
+  /* ======= Chess engine/UI ======= */
   const U = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
@@ -389,8 +407,8 @@
       }
 
       if(isCheck){
-        const kingPos = findKing(S, S.turn);
-        if(kingPos && kingPos.r===r && kingPos.c===c) sq.classList.add("check");
+        const kp = findKing(S, S.turn);
+        if(kp && kp.r===r && kp.c===c) sq.classList.add("check");
       }
 
       sq.addEventListener("click", onSquareClick);
@@ -426,7 +444,6 @@
 
     const end = gameStatus(S);
     if(end.over) return;
-
     if(S.turn==="b" && botOnSel.value==="on") return;
 
     if(selected){
@@ -465,19 +482,16 @@
     render();
     maybeBotMove();
   });
-
   undoBtn.addEventListener("click", () => {
     undo(S);
     selected = null;
     legalForSelected = [];
     render();
   });
-
   flipBtn.addEventListener("click", () => {
     flipped = !flipped;
     render();
   });
-
   depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
   botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
@@ -503,6 +517,7 @@
 
   function isSquareAttacked(state, r, c, byColor){
     const b = state.b;
+
     const dir = (byColor==="w") ? -1 : 1;
     const pr = r - dir;
     for(const dc of [-1, +1]){
@@ -640,6 +655,7 @@
         if(state.castle.bQ && !b[0][3] && !b[0][2] && !b[0][1]) push(0,2, {castle:"Q"});
       }
     }
+
     return moves;
   }
 
@@ -737,7 +753,7 @@
 
   function makeMove(state, mv, record){
     if(record){
-      const snap = {
+      state.history.push({
         b: state.b.map(r=>r.slice()),
         turn: state.turn,
         castle: {...state.castle},
@@ -745,8 +761,7 @@
         halfmove: state.halfmove,
         fullmove: state.fullmove,
         moveListLen: state.moveList.length
-      };
-      state.history.push(snap);
+      });
     }
     const san = moveToSAN(state, mv);
     applyMove(state, mv);
@@ -765,13 +780,10 @@
     state.moveList = state.moveList.slice(0, snap.moveListLen);
   }
 
-  function sqName(r,c){
-    return "abcdefgh"[c] + (8-r);
-  }
+  function sqName(r,c){ return "abcdefgh"[c] + (8-r); }
 
   function moveToSAN(state, mv){
     if(mv.castle) return (mv.castle==="K") ? "O-O" : "O-O-O";
-
     const piece = mv.piece;
     const color = piece[0], type=piece[1];
     const capture = (mv.enPassant || mv.capture) ? "x" : "";
@@ -874,9 +886,7 @@
   function minimax(state, depth, alpha, beta){
     const end = gameStatus(state);
     if(end.over){
-      if(end.message.startsWith("Checkmate")){
-        return (state.turn==="w") ? -999999 : 999999;
-      }
+      if(end.message.startsWith("Checkmate")) return (state.turn==="w") ? -999999 : 999999;
       return 0;
     }
     if(depth<=0) return evalState(state);
