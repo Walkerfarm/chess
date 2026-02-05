@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Chess vs Bot (Locked Squares)</title>
+  <title>Chess vs Bot</title>
+
+  <!-- iOS home-screen + rotation-friendly -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <style>
-    /* ====== ABSOLUTE NO-SHIFT BASELINE ====== */
     html { overflow-y: scroll; overflow-x: hidden; }
-    body { margin:0; overflow-x: hidden; }
+    body { margin:0; overflow-x:hidden; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    /* ======================================= */
 
     :root{
       --light:#f0d9b5;
@@ -20,13 +22,11 @@
       --text:#e7eaf0;
       --bg:#0f1220;
 
-      /* INTERNAL board is ALWAYS 520x520, 65px squares */
       --sq: 65px;
       --board: 520px;
 
-      /* We SCALE the whole board uniformly (no per-square rounding jitter) */
       --scale: 1;
-      --scaledBoard: 520px; /* set by JS so layout reserves exact space */
+      --scaledBoard: 520px;
       --gap: 14px;
     }
 
@@ -44,7 +44,6 @@
       justify-content:center;
     }
 
-    /* Desktop row; phone column */
     .wrap{
       width: min(1100px, 100%);
       display:flex;
@@ -56,14 +55,12 @@
       .wrap{ flex-direction: row; flex-wrap: nowrap; }
     }
 
-    /* Board wrapper reserves exact space so nothing moves when we redraw */
     .board-wrap{
       width: var(--scaledBoard);
       height: var(--scaledBoard);
       flex: 0 0 auto;
     }
 
-    /* The real board is fixed pixel grid and gets uniformly scaled */
     .board{
       width: var(--board);
       height: var(--board);
@@ -90,14 +87,13 @@
       justify-content:center;
       cursor:pointer;
       position:relative;
-      font-size: 44px; /* fixed; scaled with board */
+      font-size: 44px;
       line-height: 1;
       font-family: "Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",system-ui,sans-serif;
     }
 
     .light{ background: var(--light); color:#111; }
     .dark{ background: var(--dark); color:#111; }
-
     .sq.sel{ outline: 4px solid var(--sel); outline-offset:-4px; }
 
     .sq.hint::after{
@@ -115,11 +111,8 @@
       position:absolute;
       box-sizing:border-box;
     }
-    .sq.check{
-      box-shadow: inset 0 0 0 6px rgba(255,0,0,.35);
-    }
+    .sq.check{ box-shadow: inset 0 0 0 6px rgba(255,0,0,.35); }
 
-    /* 3D-ish pieces */
     .piece{
       display:inline-block;
       transform: translateY(-1px);
@@ -184,7 +177,6 @@
       white-space:pre-wrap;
     }
 
-    /* Always-reserved scrollbar space => zero width-jitter */
     .moves{
       margin-top:10px;
       padding:10px 12px;
@@ -220,7 +212,7 @@
         <div id="board" class="board" aria-label="Chess board"></div>
       </div>
       <div class="small" style="margin-top:10px; opacity:.85;">
-        Click/tap piece → click/tap destination. You are White. Bot is Black.
+        Tap piece → tap destination. Rotate your phone any direction; the board rescales.
       </div>
     </div>
 
@@ -229,6 +221,7 @@
         <button id="newBtn">New Game</button>
         <button id="undoBtn">Undo</button>
         <button id="flipBtn">Flip Board</button>
+        <button id="musicBtn">Music: Off</button>
       </div>
 
       <div class="row" style="margin-top:10px;">
@@ -252,32 +245,31 @@
       <div class="moves" id="moves"></div>
 
       <div class="small" style="margin-top:10px;">
-        This version keeps the board internally fixed and only scales the entire board uniformly.
+        Note: iPhone requires a tap to start audio. Use the “Music” button.
       </div>
     </div>
   </div>
 
 <script>
 (() => {
-  /* ========= SCALE BOARD UNIFORMLY (NO GRID ROUNDING JITTER) ========= */
+  /* ========= Rotation / Upside-down support =========
+     Web apps in iOS don't get a special “rotate 180” lock we can override, but:
+     - We listen to resize/orientation events
+     - We rescale uniformly to whatever the viewport is (including upside-down)
+     This keeps everything correct for any rotation the OS allows.
+  */
   function setScale(){
     const BASE = 520;
-
-    // width available in current layout:
-    // - phone: use almost full viewport width
-    // - desktop: board column has room; keep <= 1
     const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
     const vh = Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight);
 
-    // Aim for max width on small screens; also keep some vertical room.
+    // Use more vertical space in landscape; in portrait keep panel visible.
+    const isLandscape = vw > vh;
     const maxW = Math.floor(vw * 0.92);
-    const maxH = Math.floor(vh * 0.62);
+    const maxH = Math.floor(vh * (isLandscape ? 0.80 : 0.62));
+
     const target = Math.min(BASE, maxW, maxH);
-
-    // Uniform scale, clamped
     const scale = Math.max(0.45, Math.min(1, target / BASE));
-
-    // Reserve exact integer pixels for the scaled board wrapper so layout never “wiggles”
     const scaled = Math.round(BASE * scale);
 
     document.documentElement.style.setProperty("--scale", String(scale));
@@ -286,15 +278,95 @@
 
   setScale();
   window.addEventListener("resize", setScale, {passive:true});
-  window.addEventListener("orientationchange", () => setTimeout(setScale, 60), {passive:true});
+  window.addEventListener("orientationchange", () => setTimeout(setScale, 80), {passive:true});
 
-  // ========= Unicode pieces =========
+  /* ========= Soft peaceful music (generated locally) =========
+     No external files required. We synthesize a gentle pad using WebAudio.
+     iOS requires a user gesture to start audio, so the Music button does that.
+  */
+  let audioCtx = null;
+  let musicOn = false;
+  let master = null;
+  let oscillators = [];
+  let lfo = null;
+
+  function ensureAudio(){
+    if(audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    master = audioCtx.createGain();
+    master.gain.value = 0.0;
+    master.connect(audioCtx.destination);
+
+    // Gentle lowpass filter for softness
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 900;
+    lp.Q.value = 0.7;
+    master.disconnect();
+    master.connect(lp);
+    lp.connect(audioCtx.destination);
+
+    // Slight tremolo LFO
+    lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+    lfo.type = "sine";
+    lfo.frequency.value = 0.12;     // slow
+    lfoGain.gain.value = 0.12;      // depth
+    lfo.connect(lfoGain);
+
+    // We'll modulate master.gain around a base
+    const baseGain = audioCtx.createConstantSource();
+    baseGain.offset.value = 0.18;   // base loudness
+    baseGain.start();
+
+    // Sum base + lfo into master.gain
+    const sum = audioCtx.createGain();
+    baseGain.connect(sum);
+    lfoGain.connect(sum);
+    sum.connect(master.gain);
+
+    lfo.start();
+
+    // Create a warm chord pad (A minor-ish)
+    const freqs = [220, 261.63, 329.63, 392.00]; // A3, C4, E4, G4
+    oscillators = freqs.map((f, i) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = (i % 2 === 0) ? "triangle" : "sine";
+      o.frequency.value = f;
+
+      // Slight detune for richness
+      o.detune.value = (i - 1.5) * 3; // small cents
+
+      // Individual layer volume
+      g.gain.value = 0.18;
+      o.connect(g);
+      g.connect(master);
+      o.start();
+      return {o,g};
+    });
+  }
+
+  function setMusic(on){
+    ensureAudio();
+    if(audioCtx.state === "suspended") audioCtx.resume().catch(()=>{});
+    musicOn = on;
+
+    // Smooth fade to avoid clicks
+    const now = audioCtx.currentTime;
+    const target = on ? 1.0 : 0.0;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(master.gain.value, now);
+    master.gain.linearRampToValueAtTime(target, now + 0.6);
+  }
+
+  /* ========= Chess engine/UI ========= */
   const U = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
   };
 
-  // Board: 8x8, [r][c], r=0 is rank 8, c=0 is file a.
   const initial = () => ([
     ["bR","bN","bB","bQ","bK","bB","bN","bR"],
     ["bP","bP","bP","bP","bP","bP","bP","bP"],
@@ -308,7 +380,6 @@
 
   const pieceVal = { P:100, N:320, B:330, R:500, Q:900, K:20000 };
 
-  // Small PST (white perspective). Black mirrored.
   const PST = {
     P: [
       [ 0, 0, 0, 0, 0, 0, 0, 0],
@@ -394,14 +465,25 @@
   const newBtn = document.getElementById("newBtn");
   const undoBtn = document.getElementById("undoBtn");
   const flipBtn = document.getElementById("flipBtn");
+  const musicBtn = document.getElementById("musicBtn");
   const depthSel = document.getElementById("depthSel");
   const botOnSel = document.getElementById("botOnSel");
 
   let selected = null;
   let legalForSelected = [];
 
+  musicBtn.addEventListener("click", async () => {
+    // iOS needs a click gesture. This button is the gesture.
+    if(!musicOn){
+      setMusic(true);
+      musicBtn.textContent = "Music: On";
+    } else {
+      setMusic(false);
+      musicBtn.textContent = "Music: Off";
+    }
+  });
+
   function render(){
-    // (Rebuilding the board does NOT change layout now because wrapper size is fixed.)
     boardEl.innerHTML = "";
     const b = S.b;
     const isCheck = inCheck(S, S.turn);
