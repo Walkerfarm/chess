@@ -5,10 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>Chess vs Bot</title>
 
-  <!-- iOS home-screen + rotation-friendly -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
   <style>
     html { overflow-y: scroll; overflow-x: hidden; }
     body { margin:0; overflow-x:hidden; }
@@ -22,9 +18,11 @@
       --text:#e7eaf0;
       --bg:#0f1220;
 
+      /* internal fixed board */
       --sq: 65px;
       --board: 520px;
 
+      /* uniform scale for any screen size */
       --scale: 1;
       --scaledBoard: 520px;
       --gap: 14px;
@@ -44,8 +42,15 @@
       justify-content:center;
     }
 
-    .wrap{
+    /* Everything is inside this so we can 180° flip it */
+    #app{
+      transform: rotate(0deg);
+      transform-origin: center center;
       width: min(1100px, 100%);
+    }
+
+    .wrap{
+      width: 100%;
       display:flex;
       gap: var(--gap);
       align-items:flex-start;
@@ -87,7 +92,7 @@
       justify-content:center;
       cursor:pointer;
       position:relative;
-      font-size: 44px;
+      font-size: 44px; /* fixed, scaled with board */
       line-height: 1;
       font-family: "Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",system-ui,sans-serif;
     }
@@ -113,6 +118,7 @@
     }
     .sq.check{ box-shadow: inset 0 0 0 6px rgba(255,0,0,.35); }
 
+    /* 3D-ish pieces */
     .piece{
       display:inline-block;
       transform: translateY(-1px);
@@ -148,7 +154,7 @@
       flex: 0 0 auto;
     }
     @media (min-width: 900px){
-      .panel{ width: 360px; flex: 0 0 360px; }
+      .panel{ width: 380px; flex: 0 0 380px; }
     }
 
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -206,65 +212,69 @@
 </head>
 
 <body>
-  <div class="wrap">
-    <div>
-      <div class="board-wrap">
-        <div id="board" class="board" aria-label="Chess board"></div>
-      </div>
-      <div class="small" style="margin-top:10px; opacity:.85;">
-        Tap piece → tap destination. Rotate your phone any direction; the board rescales.
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="row">
-        <button id="newBtn">New Game</button>
-        <button id="undoBtn">Undo</button>
-        <button id="flipBtn">Flip Board</button>
-        <button id="musicBtn">Music: Off</button>
+  <div id="app">
+    <div class="wrap">
+      <div>
+        <div class="board-wrap">
+          <div id="board" class="board" aria-label="Chess board"></div>
+        </div>
+        <div class="small" style="margin-top:10px; opacity:.85;">
+          iPhone note: iOS often won’t rotate upside-down. Use “Auto 180° Flip” for that.
+        </div>
       </div>
 
-      <div class="row" style="margin-top:10px;">
-        <span class="tag">Bot strength:
-          <select id="depthSel">
-            <option value="1">Very Easy (Depth 1)</option>
-            <option value="2" selected>Easy (Depth 2)</option>
-            <option value="3">Medium (Depth 3)</option>
-            <option value="4">Hard (Depth 4)</option>
-          </select>
-        </span>
-        <span class="tag">Bot:
-          <select id="botOnSel">
-            <option value="on" selected>On</option>
-            <option value="off">Off</option>
-          </select>
-        </span>
-      </div>
+      <div class="panel">
+        <div class="row">
+          <button id="newBtn">New Game</button>
+          <button id="undoBtn">Undo</button>
+          <button id="flipBtn">Flip Board</button>
+          <button id="musicBtn">Music: Off</button>
+          <button id="autoFlipBtn">Auto 180° Flip: Off</button>
+        </div>
 
-      <div class="status" id="status"></div>
-      <div class="moves" id="moves"></div>
+        <div class="row" style="margin-top:10px;">
+          <span class="tag">Bot strength:
+            <select id="depthSel">
+              <option value="1">Very Easy (Depth 1)</option>
+              <option value="2" selected>Easy (Depth 2)</option>
+              <option value="3">Medium (Depth 3)</option>
+              <option value="4">Hard (Depth 4)</option>
+            </select>
+          </span>
+          <span class="tag">Bot:
+            <select id="botOnSel">
+              <option value="on" selected>On</option>
+              <option value="off">Off</option>
+            </select>
+          </span>
+          <span class="tag">Music volume:
+            <select id="volSel">
+              <option value="0.06">Low</option>
+              <option value="0.10" selected>Med</option>
+              <option value="0.14">High</option>
+            </select>
+          </span>
+        </div>
 
-      <div class="small" style="margin-top:10px;">
-        Note: iPhone requires a tap to start audio. Use the “Music” button.
+        <div class="status" id="status"></div>
+        <div class="moves" id="moves"></div>
+
+        <div class="small" style="margin-top:10px;">
+          Audio requires a tap on iPhone. Music truly stops (scheduler clears + fade out).
+        </div>
       </div>
     </div>
   </div>
 
 <script>
 (() => {
-  /* ========= Rotation / Upside-down support =========
-     Web apps in iOS don't get a special “rotate 180” lock we can override, but:
-     - We listen to resize/orientation events
-     - We rescale uniformly to whatever the viewport is (including upside-down)
-     This keeps everything correct for any rotation the OS allows.
-  */
+  /* ========= Uniform scale for any rotation ========= */
   function setScale(){
     const BASE = 520;
     const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
     const vh = Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight);
-
-    // Use more vertical space in landscape; in portrait keep panel visible.
     const isLandscape = vw > vh;
+
     const maxW = Math.floor(vw * 0.92);
     const maxH = Math.floor(vh * (isLandscape ? 0.80 : 0.62));
 
@@ -275,93 +285,329 @@
     document.documentElement.style.setProperty("--scale", String(scale));
     document.documentElement.style.setProperty("--scaledBoard", scaled + "px");
   }
-
   setScale();
   window.addEventListener("resize", setScale, {passive:true});
   window.addEventListener("orientationchange", () => setTimeout(setScale, 80), {passive:true});
 
-  /* ========= Soft peaceful music (generated locally) =========
-     No external files required. We synthesize a gentle pad using WebAudio.
-     iOS requires a user gesture to start audio, so the Music button does that.
-  */
+  /* ========= Auto 180° flip (works even if iOS won’t rotate upside-down) ========= */
+  const appEl = document.getElementById("app");
+  const autoFlipBtn = document.getElementById("autoFlipBtn");
+  let autoFlipOn = false;
+  let lastFlip = 0; // 0 or 180
+
+  function applyFlip(deg){
+    if (deg === lastFlip) return;
+    lastFlip = deg;
+    appEl.style.transform = `rotate(${deg}deg)`;
+  }
+
+  async function enableDeviceOrientation(){
+    if (typeof DeviceOrientationEvent === "undefined") return false;
+
+    // iOS 13+ requires permission
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      try{
+        const res = await DeviceOrientationEvent.requestPermission();
+        return res === "granted";
+      } catch {
+        return false;
+      }
+    }
+    // non-iOS / older
+    return true;
+  }
+
+  function handleOrientationEvent(e){
+    // We want to detect "upside down" while in portrait-ish usage.
+    // beta: front-to-back tilt; gamma: left-right tilt
+    // When the phone is upside down in portrait, beta tends to be negative (~ -170..-10)
+    // We'll use a simple stable rule:
+    const beta = (typeof e.beta === "number") ? e.beta : 0;
+
+    // Determine if upside-down portrait-ish:
+    // Normal portrait: beta around +90 when upright; upside-down: around -90 (or < 0).
+    // Use threshold to reduce jitter:
+    const shouldFlip = beta < -25;
+
+    applyFlip(shouldFlip ? 180 : 0);
+  }
+
+  autoFlipBtn.addEventListener("click", async () => {
+    if(!autoFlipOn){
+      const ok = await enableDeviceOrientation();
+      if(!ok){
+        alert("Auto 180° Flip needs Motion & Orientation access. If prompted, tap Allow. If you didn’t get a prompt, check iPhone Settings > Safari > Motion & Orientation Access.");
+        return;
+      }
+      window.addEventListener("deviceorientation", handleOrientationEvent, true);
+      autoFlipOn = true;
+      autoFlipBtn.textContent = "Auto 180° Flip: On";
+    } else {
+      window.removeEventListener("deviceorientation", handleOrientationEvent, true);
+      autoFlipOn = false;
+      autoFlipBtn.textContent = "Auto 180° Flip: Off";
+      applyFlip(0);
+    }
+  });
+
+  /* ========= Peaceful music (soft pad + slow pentatonic chimes) ========= */
+  const musicBtn = document.getElementById("musicBtn");
+  const volSel = document.getElementById("volSel");
+
   let audioCtx = null;
   let musicOn = false;
-  let master = null;
-  let oscillators = [];
-  let lfo = null;
+
+  let outGain = null;
+  let padGain = null;
+  let convolver = null;
+  let delay = null;
+
+  let padOscs = [];
+  let chimeTimer = null;
+
+  function createImpulseResponse(ctx, seconds=2.2, decay=3.5){
+    const rate = ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const impulse = ctx.createBuffer(2, length, rate);
+    for(let ch=0; ch<2; ch++){
+      const data = impulse.getChannelData(ch);
+      for(let i=0; i<length; i++){
+        const t = i/length;
+        // noise with exponential decay
+        data[i] = (Math.random()*2-1) * Math.pow(1 - t, decay);
+      }
+    }
+    return impulse;
+  }
 
   function ensureAudio(){
     if(audioCtx) return;
+
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    master = audioCtx.createGain();
-    master.gain.value = 0.0;
-    master.connect(audioCtx.destination);
+    // Final output gain we control for on/off (this FIXES "music won't stop")
+    outGain = audioCtx.createGain();
+    outGain.gain.value = 0.0;
+    outGain.connect(audioCtx.destination);
 
-    // Gentle lowpass filter for softness
+    // Effects chain: (dry + wet) -> outGain
+    const wet = audioCtx.createGain();
+    wet.gain.value = 0.35;
+
+    const dry = audioCtx.createGain();
+    dry.gain.value = 0.75;
+
+    convolver = audioCtx.createConvolver();
+    convolver.buffer = createImpulseResponse(audioCtx);
+
+    delay = audioCtx.createDelay(1.0);
+    delay.delayTime.value = 0.26;
+
+    const fb = audioCtx.createGain();
+    fb.gain.value = 0.25;
+
+    delay.connect(fb);
+    fb.connect(delay);
+
+    // wet: convolver + delay feedback
+    const wetSum = audioCtx.createGain();
+    wetSum.gain.value = 1.0;
+
+    // Route wet
+    wetSum.connect(convolver);
+    convolver.connect(wet);
+    wet.connect(outGain);
+
+    wetSum.connect(delay);
+    delay.connect(wet);
+    wet.connect(outGain);
+
+    // Route dry
+    dry.connect(outGain);
+
+    // Store for later routing
+    ensureAudio._wetIn = wetSum;
+    ensureAudio._dryIn = dry;
+
+    // Gentle pad (3 notes, very soft)
+    padGain = audioCtx.createGain();
+    padGain.gain.value = 0.10;
+
     const lp = audioCtx.createBiquadFilter();
     lp.type = "lowpass";
-    lp.frequency.value = 900;
-    lp.Q.value = 0.7;
-    master.disconnect();
-    master.connect(lp);
-    lp.connect(audioCtx.destination);
+    lp.frequency.value = 650;
+    lp.Q.value = 0.6;
 
-    // Slight tremolo LFO
-    lfo = audioCtx.createOscillator();
-    const lfoGain = audioCtx.createGain();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.12;     // slow
-    lfoGain.gain.value = 0.12;      // depth
-    lfo.connect(lfoGain);
+    padGain.connect(lp);
+    lp.connect(ensureAudio._dryIn);
+    lp.connect(ensureAudio._wetIn);
 
-    // We'll modulate master.gain around a base
-    const baseGain = audioCtx.createConstantSource();
-    baseGain.offset.value = 0.18;   // base loudness
-    baseGain.start();
+    // Build pad oscillators on-demand when starting music
+  }
 
-    // Sum base + lfo into master.gain
-    const sum = audioCtx.createGain();
-    baseGain.connect(sum);
-    lfoGain.connect(sum);
-    sum.connect(master.gain);
-
-    lfo.start();
-
-    // Create a warm chord pad (A minor-ish)
-    const freqs = [220, 261.63, 329.63, 392.00]; // A3, C4, E4, G4
-    oscillators = freqs.map((f, i) => {
+  function startPad(){
+    // A minor add9-ish: A3 C4 E4 B4 (we’ll use 3 voices to keep it calm)
+    const freqs = [220.00, 261.63, 329.63];
+    padOscs = freqs.map((f, i) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
-      o.type = (i % 2 === 0) ? "triangle" : "sine";
+      o.type = (i===0) ? "sine" : "triangle";
       o.frequency.value = f;
-
-      // Slight detune for richness
-      o.detune.value = (i - 1.5) * 3; // small cents
-
-      // Individual layer volume
+      o.detune.value = (i-1)*2.5; // tiny detune
       g.gain.value = 0.18;
       o.connect(g);
-      g.connect(master);
+      g.connect(padGain);
       o.start();
       return {o,g};
     });
+
+    // Slow breathing (pad amplitude)
+    const breath = audioCtx.createOscillator();
+    const breathGain = audioCtx.createGain();
+    breath.type = "sine";
+    breath.frequency.value = 0.06;
+    breathGain.gain.value = 0.05;
+    breath.connect(breathGain);
+    breathGain.connect(padGain.gain);
+    padGain.gain.value = 0.08;
+    breath.start();
+    startPad._breath = breath;
   }
 
-  function setMusic(on){
-    ensureAudio();
-    if(audioCtx.state === "suspended") audioCtx.resume().catch(()=>{});
-    musicOn = on;
+  function stopPad(){
+    try { if(startPad._breath) startPad._breath.stop(); } catch {}
+    startPad._breath = null;
 
-    // Smooth fade to avoid clicks
+    for(const v of padOscs){
+      try { v.o.stop(); } catch {}
+    }
+    padOscs = [];
+  }
+
+  function playChime(freq){
+    // soft bell-like chime: sine + a bit of harmonic + quick attack/long release
+    const t = audioCtx.currentTime;
+
+    const o1 = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
+    o1.type = "sine";
+    o2.type = "sine";
+    o1.frequency.setValueAtTime(freq, t);
+    o2.frequency.setValueAtTime(freq*2.01, t);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.10, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+
+    const hp = audioCtx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 200;
+
+    o1.connect(hp);
+    o2.connect(hp);
+    hp.connect(g);
+
+    // send to dry and wet
+    g.connect(ensureAudio._dryIn);
+    g.connect(ensureAudio._wetIn);
+
+    o1.start(t);
+    o2.start(t);
+    o1.stop(t + 2.4);
+    o2.stop(t + 2.4);
+  }
+
+  function startChimes(){
+    // A minor pentatonic-ish (peaceful): A C D E G across octaves
+    const pool = [220, 261.63, 293.66, 329.63, 392.00, 440, 523.25];
+    let last = -1;
+
+    chimeTimer = setInterval(() => {
+      if(!musicOn) return;
+
+      // pick a different note than last
+      let idx = Math.floor(Math.random() * pool.length);
+      if(idx === last) idx = (idx + 1) % pool.length;
+      last = idx;
+
+      // occasionally skip to keep it sparse
+      if(Math.random() < 0.25) return;
+
+      playChime(pool[idx]);
+    }, 1500);
+  }
+
+  function stopChimes(){
+    if(chimeTimer){
+      clearInterval(chimeTimer);
+      chimeTimer = null;
+    }
+  }
+
+  function fadeOutAndMaybeSuspend(){
+    if(!audioCtx) return;
     const now = audioCtx.currentTime;
-    const target = on ? 1.0 : 0.0;
-    master.gain.cancelScheduledValues(now);
-    master.gain.setValueAtTime(master.gain.value, now);
-    master.gain.linearRampToValueAtTime(target, now + 0.6);
+    outGain.gain.cancelScheduledValues(now);
+    outGain.gain.setValueAtTime(outGain.gain.value, now);
+    outGain.gain.linearRampToValueAtTime(0.0, now + 0.6);
+
+    // Stop sources after fade to guarantee silence
+    setTimeout(() => {
+      stopChimes();
+      stopPad();
+      // optional: suspend to save battery
+      audioCtx.suspend().catch(()=>{});
+    }, 650);
   }
 
-  /* ========= Chess engine/UI ========= */
+  async function setMusic(on){
+    ensureAudio();
+
+    // iOS needs a gesture; this function is called from button click.
+    if(audioCtx.state === "suspended"){
+      try{ await audioCtx.resume(); } catch {}
+    }
+
+    const targetVol = Math.max(0.02, Math.min(0.20, parseFloat(volSel.value || "0.10")));
+
+    if(on){
+      musicOn = true;
+
+      // start sources if not running
+      if(padOscs.length === 0) startPad();
+      if(!chimeTimer) startChimes();
+
+      const now = audioCtx.currentTime;
+      outGain.gain.cancelScheduledValues(now);
+      outGain.gain.setValueAtTime(outGain.gain.value, now);
+      outGain.gain.linearRampToValueAtTime(targetVol, now + 0.8);
+    } else {
+      musicOn = false;
+      fadeOutAndMaybeSuspend();
+    }
+  }
+
+  musicBtn.addEventListener("click", async () => {
+    if(!musicOn){
+      await setMusic(true);
+      musicBtn.textContent = "Music: On";
+    } else {
+      await setMusic(false);
+      musicBtn.textContent = "Music: Off";
+    }
+  });
+
+  volSel.addEventListener("change", () => {
+    if(!audioCtx || !musicOn) return;
+    const now = audioCtx.currentTime;
+    const targetVol = Math.max(0.02, Math.min(0.20, parseFloat(volSel.value || "0.10")));
+    outGain.gain.cancelScheduledValues(now);
+    outGain.gain.setValueAtTime(outGain.gain.value, now);
+    outGain.gain.linearRampToValueAtTime(targetVol, now + 0.25);
+  });
+
+  /* ========= Chess game (same engine as before) ========= */
   const U = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
@@ -465,23 +711,11 @@
   const newBtn = document.getElementById("newBtn");
   const undoBtn = document.getElementById("undoBtn");
   const flipBtn = document.getElementById("flipBtn");
-  const musicBtn = document.getElementById("musicBtn");
   const depthSel = document.getElementById("depthSel");
   const botOnSel = document.getElementById("botOnSel");
 
   let selected = null;
   let legalForSelected = [];
-
-  musicBtn.addEventListener("click", async () => {
-    // iOS needs a click gesture. This button is the gesture.
-    if(!musicOn){
-      setMusic(true);
-      musicBtn.textContent = "Music: On";
-    } else {
-      setMusic(false);
-      musicBtn.textContent = "Music: Off";
-    }
-  });
 
   function render(){
     boardEl.innerHTML = "";
@@ -509,7 +743,6 @@
       }
 
       if(selected && selected.r===r && selected.c===c) sq.classList.add("sel");
-
       for(const mv of legalForSelected){
         if(mv.to.r===r && mv.to.c===c) sq.classList.add(b[r][c] ? "cap" : "hint");
       }
@@ -622,7 +855,6 @@
 
   function isSquareAttacked(state, r, c, byColor){
     const b = state.b;
-
     const dir = (byColor==="w") ? -1 : 1;
     const pr = r - dir;
     for(const dc of [-1, +1]){
