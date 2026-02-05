@@ -42,7 +42,7 @@
       justify-content:center;
     }
 
-    /* Everything is inside this so we can 180° flip it */
+    /* Rotate the whole app (manual or auto 180° flip) */
     #app{
       transform: rotate(0deg);
       transform-origin: center center;
@@ -154,7 +154,7 @@
       flex: 0 0 auto;
     }
     @media (min-width: 900px){
-      .panel{ width: 380px; flex: 0 0 380px; }
+      .panel{ width: 400px; flex: 0 0 400px; }
     }
 
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -219,7 +219,7 @@
           <div id="board" class="board" aria-label="Chess board"></div>
         </div>
         <div class="small" style="margin-top:10px; opacity:.85;">
-          iPhone note: iOS often won’t rotate upside-down. Use “Auto 180° Flip” for that.
+          iPhone note: iOS usually won’t rotate to upside-down portrait. Use Auto 180° Flip or Rotate 180°.
         </div>
       </div>
 
@@ -230,6 +230,7 @@
           <button id="flipBtn">Flip Board</button>
           <button id="musicBtn">Music: Off</button>
           <button id="autoFlipBtn">Auto 180° Flip: Off</button>
+          <button id="rotate180Btn">Rotate 180°</button>
         </div>
 
         <div class="row" style="margin-top:10px;">
@@ -241,12 +242,14 @@
               <option value="4">Hard (Depth 4)</option>
             </select>
           </span>
+
           <span class="tag">Bot:
             <select id="botOnSel">
               <option value="on" selected>On</option>
               <option value="off">Off</option>
             </select>
           </span>
+
           <span class="tag">Music volume:
             <select id="volSel">
               <option value="0.06">Low</option>
@@ -260,7 +263,7 @@
         <div class="moves" id="moves"></div>
 
         <div class="small" style="margin-top:10px;">
-          Audio requires a tap on iPhone. Music truly stops (scheduler clears + fade out).
+          Audio starts only after a tap on iPhone. Music toggle fully stops (fade out + stop sources).
         </div>
       </div>
     </div>
@@ -289,68 +292,95 @@
   window.addEventListener("resize", setScale, {passive:true});
   window.addEventListener("orientationchange", () => setTimeout(setScale, 80), {passive:true});
 
-  /* ========= Auto 180° flip (works even if iOS won’t rotate upside-down) ========= */
+  /* ========= 180° UI rotation (manual + auto via devicemotion) ========= */
   const appEl = document.getElementById("app");
   const autoFlipBtn = document.getElementById("autoFlipBtn");
+  const rotate180Btn = document.getElementById("rotate180Btn");
+
   let autoFlipOn = false;
   let lastFlip = 0; // 0 or 180
+  let motionHandler = null;
 
   function applyFlip(deg){
+    deg = (deg === 180) ? 180 : 0;
     if (deg === lastFlip) return;
     lastFlip = deg;
     appEl.style.transform = `rotate(${deg}deg)`;
   }
 
-  async function enableDeviceOrientation(){
-    if (typeof DeviceOrientationEvent === "undefined") return false;
+  rotate180Btn.addEventListener("click", () => {
+    applyFlip(lastFlip === 0 ? 180 : 0);
+  });
 
-    // iOS 13+ requires permission
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+  async function requestMotionPermission(){
+    if (typeof DeviceMotionEvent === "undefined") return false;
+
+    // iOS requires permission
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
       try{
-        const res = await DeviceOrientationEvent.requestPermission();
+        const res = await DeviceMotionEvent.requestPermission();
         return res === "granted";
       } catch {
         return false;
       }
     }
-    // non-iOS / older
     return true;
   }
 
-  function handleOrientationEvent(e){
-    // We want to detect "upside down" while in portrait-ish usage.
-    // beta: front-to-back tilt; gamma: left-right tilt
-    // When the phone is upside down in portrait, beta tends to be negative (~ -170..-10)
-    // We'll use a simple stable rule:
-    const beta = (typeof e.beta === "number") ? e.beta : 0;
+  function startAutoFlip(){
+    motionHandler = (e) => {
+      const g = e.accelerationIncludingGravity;
+      if(!g) return;
 
-    // Determine if upside-down portrait-ish:
-    // Normal portrait: beta around +90 when upright; upside-down: around -90 (or < 0).
-    // Use threshold to reduce jitter:
-    const shouldFlip = beta < -25;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const landscape = vw > vh;
 
-    applyFlip(shouldFlip ? 180 : 0);
+      const TH = 7.0; // threshold against ~9.8 gravity
+
+      // Use y in portrait, x in landscape. Flip when strongly inverted.
+      if(!landscape){
+        if (g.y <= -TH) applyFlip(180);
+        else if (g.y >= TH) applyFlip(0);
+      } else {
+        if (g.x <= -TH) applyFlip(180);
+        else if (g.x >= TH) applyFlip(0);
+      }
+    };
+
+    window.addEventListener("devicemotion", motionHandler, { passive: true });
+  }
+
+  function stopAutoFlip(){
+    if(motionHandler){
+      window.removeEventListener("devicemotion", motionHandler);
+      motionHandler = null;
+    }
+    applyFlip(0);
   }
 
   autoFlipBtn.addEventListener("click", async () => {
     if(!autoFlipOn){
-      const ok = await enableDeviceOrientation();
+      const ok = await requestMotionPermission();
       if(!ok){
-        alert("Auto 180° Flip needs Motion & Orientation access. If prompted, tap Allow. If you didn’t get a prompt, check iPhone Settings > Safari > Motion & Orientation Access.");
+        alert(
+          "Auto 180° Flip needs Motion access.\n\n" +
+          "If you tapped 'Don't Allow' earlier, Safari may remember it.\n" +
+          "Try: Settings → Safari → Clear History and Website Data, then reload and tap Auto Flip again."
+        );
         return;
       }
-      window.addEventListener("deviceorientation", handleOrientationEvent, true);
+      startAutoFlip();
       autoFlipOn = true;
       autoFlipBtn.textContent = "Auto 180° Flip: On";
     } else {
-      window.removeEventListener("deviceorientation", handleOrientationEvent, true);
+      stopAutoFlip();
       autoFlipOn = false;
       autoFlipBtn.textContent = "Auto 180° Flip: Off";
-      applyFlip(0);
     }
   });
 
-  /* ========= Peaceful music (soft pad + slow pentatonic chimes) ========= */
+  /* ========= Peaceful music (soft pad + sparse chimes) ========= */
   const musicBtn = document.getElementById("musicBtn");
   const volSel = document.getElementById("volSel");
 
@@ -359,11 +389,13 @@
 
   let outGain = null;
   let padGain = null;
-  let convolver = null;
-  let delay = null;
 
   let padOscs = [];
   let chimeTimer = null;
+
+  // internal routing helpers
+  let dryIn = null;
+  let wetIn = null;
 
   function createImpulseResponse(ctx, seconds=2.2, decay=3.5){
     const rate = ctx.sampleRate;
@@ -373,7 +405,6 @@
       const data = impulse.getChannelData(ch);
       for(let i=0; i<length; i++){
         const t = i/length;
-        // noise with exponential decay
         data[i] = (Math.random()*2-1) * Math.pow(1 - t, decay);
       }
     }
@@ -385,53 +416,48 @@
 
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // Final output gain we control for on/off (this FIXES "music won't stop")
+    // final output gain: THIS makes Off truly silent
     outGain = audioCtx.createGain();
     outGain.gain.value = 0.0;
     outGain.connect(audioCtx.destination);
 
-    // Effects chain: (dry + wet) -> outGain
-    const wet = audioCtx.createGain();
-    wet.gain.value = 0.35;
+    dryIn = audioCtx.createGain();
+    wetIn = audioCtx.createGain();
+    dryIn.gain.value = 1.0;
+    wetIn.gain.value = 1.0;
 
-    const dry = audioCtx.createGain();
-    dry.gain.value = 0.75;
-
-    convolver = audioCtx.createConvolver();
+    // Gentle reverb + echo
+    const convolver = audioCtx.createConvolver();
     convolver.buffer = createImpulseResponse(audioCtx);
 
-    delay = audioCtx.createDelay(1.0);
+    const delay = audioCtx.createDelay(1.0);
     delay.delayTime.value = 0.26;
 
     const fb = audioCtx.createGain();
     fb.gain.value = 0.25;
-
     delay.connect(fb);
     fb.connect(delay);
 
-    // wet: convolver + delay feedback
-    const wetSum = audioCtx.createGain();
-    wetSum.gain.value = 1.0;
+    const wetOut = audioCtx.createGain();
+    wetOut.gain.value = 0.35;
+    const dryOut = audioCtx.createGain();
+    dryOut.gain.value = 0.75;
 
-    // Route wet
-    wetSum.connect(convolver);
-    convolver.connect(wet);
-    wet.connect(outGain);
+    // route wet
+    wetIn.connect(convolver);
+    convolver.connect(wetOut);
+    wetOut.connect(outGain);
 
-    wetSum.connect(delay);
-    delay.connect(wet);
-    wet.connect(outGain);
+    wetIn.connect(delay);
+    delay.connect(wetOut);
 
-    // Route dry
-    dry.connect(outGain);
+    // route dry
+    dryIn.connect(dryOut);
+    dryOut.connect(outGain);
 
-    // Store for later routing
-    ensureAudio._wetIn = wetSum;
-    ensureAudio._dryIn = dry;
-
-    // Gentle pad (3 notes, very soft)
+    // pad chain
     padGain = audioCtx.createGain();
-    padGain.gain.value = 0.10;
+    padGain.gain.value = 0.08;
 
     const lp = audioCtx.createBiquadFilter();
     lp.type = "lowpass";
@@ -439,21 +465,19 @@
     lp.Q.value = 0.6;
 
     padGain.connect(lp);
-    lp.connect(ensureAudio._dryIn);
-    lp.connect(ensureAudio._wetIn);
-
-    // Build pad oscillators on-demand when starting music
+    lp.connect(dryIn);
+    lp.connect(wetIn);
   }
 
   function startPad(){
-    // A minor add9-ish: A3 C4 E4 B4 (we’ll use 3 voices to keep it calm)
+    // A minor calm pad: A3 C4 E4 (soft)
     const freqs = [220.00, 261.63, 329.63];
     padOscs = freqs.map((f, i) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
       o.type = (i===0) ? "sine" : "triangle";
       o.frequency.value = f;
-      o.detune.value = (i-1)*2.5; // tiny detune
+      o.detune.value = (i-1)*2.5;
       g.gain.value = 0.18;
       o.connect(g);
       g.connect(padGain);
@@ -461,7 +485,7 @@
       return {o,g};
     });
 
-    // Slow breathing (pad amplitude)
+    // slow “breathing” volume
     const breath = audioCtx.createOscillator();
     const breathGain = audioCtx.createGain();
     breath.type = "sine";
@@ -469,23 +493,20 @@
     breathGain.gain.value = 0.05;
     breath.connect(breathGain);
     breathGain.connect(padGain.gain);
-    padGain.gain.value = 0.08;
     breath.start();
     startPad._breath = breath;
   }
 
   function stopPad(){
-    try { if(startPad._breath) startPad._breath.stop(); } catch {}
+    try{ if(startPad._breath) startPad._breath.stop(); } catch {}
     startPad._breath = null;
-
     for(const v of padOscs){
-      try { v.o.stop(); } catch {}
+      try{ v.o.stop(); } catch {}
     }
     padOscs = [];
   }
 
   function playChime(freq){
-    // soft bell-like chime: sine + a bit of harmonic + quick attack/long release
     const t = audioCtx.currentTime;
 
     const o1 = audioCtx.createOscillator();
@@ -508,9 +529,8 @@
     o2.connect(hp);
     hp.connect(g);
 
-    // send to dry and wet
-    g.connect(ensureAudio._dryIn);
-    g.connect(ensureAudio._wetIn);
+    g.connect(dryIn);
+    g.connect(wetIn);
 
     o1.start(t);
     o2.start(t);
@@ -519,20 +539,17 @@
   }
 
   function startChimes(){
-    // A minor pentatonic-ish (peaceful): A C D E G across octaves
-    const pool = [220, 261.63, 293.66, 329.63, 392.00, 440, 523.25];
+    const pool = [220, 261.63, 293.66, 329.63, 392.00, 440, 523.25]; // A C D E G (+ octaves)
     let last = -1;
 
     chimeTimer = setInterval(() => {
       if(!musicOn) return;
 
-      // pick a different note than last
+      if(Math.random() < 0.28) return; // sparse
+
       let idx = Math.floor(Math.random() * pool.length);
       if(idx === last) idx = (idx + 1) % pool.length;
       last = idx;
-
-      // occasionally skip to keep it sparse
-      if(Math.random() < 0.25) return;
 
       playChime(pool[idx]);
     }, 1500);
@@ -545,46 +562,36 @@
     }
   }
 
-  function fadeOutAndMaybeSuspend(){
-    if(!audioCtx) return;
-    const now = audioCtx.currentTime;
-    outGain.gain.cancelScheduledValues(now);
-    outGain.gain.setValueAtTime(outGain.gain.value, now);
-    outGain.gain.linearRampToValueAtTime(0.0, now + 0.6);
-
-    // Stop sources after fade to guarantee silence
-    setTimeout(() => {
-      stopChimes();
-      stopPad();
-      // optional: suspend to save battery
-      audioCtx.suspend().catch(()=>{});
-    }, 650);
-  }
-
   async function setMusic(on){
     ensureAudio();
 
-    // iOS needs a gesture; this function is called from button click.
     if(audioCtx.state === "suspended"){
       try{ await audioCtx.resume(); } catch {}
     }
 
     const targetVol = Math.max(0.02, Math.min(0.20, parseFloat(volSel.value || "0.10")));
+    const now = audioCtx.currentTime;
 
     if(on){
       musicOn = true;
-
-      // start sources if not running
       if(padOscs.length === 0) startPad();
       if(!chimeTimer) startChimes();
 
-      const now = audioCtx.currentTime;
       outGain.gain.cancelScheduledValues(now);
       outGain.gain.setValueAtTime(outGain.gain.value, now);
       outGain.gain.linearRampToValueAtTime(targetVol, now + 0.8);
     } else {
       musicOn = false;
-      fadeOutAndMaybeSuspend();
+      outGain.gain.cancelScheduledValues(now);
+      outGain.gain.setValueAtTime(outGain.gain.value, now);
+      outGain.gain.linearRampToValueAtTime(0.0, now + 0.6);
+
+      // HARD STOP sources after fade so it cannot keep playing
+      setTimeout(() => {
+        stopChimes();
+        stopPad();
+        audioCtx.suspend().catch(()=>{});
+      }, 650);
     }
   }
 
@@ -607,13 +614,13 @@
     outGain.gain.linearRampToValueAtTime(targetVol, now + 0.25);
   });
 
-  /* ========= Chess game (same engine as before) ========= */
-  const U = {
+  /* ========= Chess engine/UI ========= */
+  const UPIECES = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
   };
 
-  const initial = () => ([
+  const initialBoard = () => ([
     ["bR","bN","bB","bQ","bK","bB","bN","bR"],
     ["bP","bP","bP","bP","bP","bP","bP","bP"],
     [null,null,null,null,null,null,null,null],
@@ -624,77 +631,9 @@
     ["wR","wN","wB","wQ","wK","wB","wN","wR"]
   ]);
 
-  const pieceVal = { P:100, N:320, B:330, R:500, Q:900, K:20000 };
-
-  const PST = {
-    P: [
-      [ 0, 0, 0, 0, 0, 0, 0, 0],
-      [ 5,10,10,-20,-20,10,10, 5],
-      [ 5,-5,-10, 0, 0,-10,-5, 5],
-      [ 0, 0, 0, 20, 20, 0, 0, 0],
-      [ 5, 5,10, 25, 25,10, 5, 5],
-      [10,10,20, 30, 30,20,10,10],
-      [50,50,50, 50, 50,50,50,50],
-      [ 0, 0, 0, 0, 0, 0, 0, 0],
-    ],
-    N: [
-      [-50,-40,-30,-30,-30,-30,-40,-50],
-      [-40,-20, 0, 0, 0, 0,-20,-40],
-      [-30, 0,10,15,15,10, 0,-30],
-      [-30, 5,15,20,20,15, 5,-30],
-      [-30, 0,15,20,20,15, 0,-30],
-      [-30, 5,10,15,15,10, 5,-30],
-      [-40,-20, 0, 5, 5, 0,-20,-40],
-      [-50,-40,-30,-30,-30,-30,-40,-50],
-    ],
-    B: [
-      [-20,-10,-10,-10,-10,-10,-10,-20],
-      [-10, 0, 0, 0, 0, 0, 0,-10],
-      [-10, 0, 5,10,10, 5, 0,-10],
-      [-10, 5, 5,10,10, 5, 5,-10],
-      [-10, 0,10,10,10,10, 0,-10],
-      [-10,10,10,10,10,10,10,-10],
-      [-10, 5, 0, 0, 0, 0, 5,-10],
-      [-20,-10,-10,-10,-10,-10,-10,-20],
-    ],
-    R: [
-      [ 0, 0, 0, 5, 5, 0, 0, 0],
-      [-5, 0, 0, 0, 0, 0, 0,-5],
-      [-5, 0, 0, 0, 0, 0, 0,-5],
-      [-5, 0, 0, 0, 0, 0, 0,-5],
-      [-5, 0, 0, 0, 0, 0, 0,-5],
-      [-5, 0, 0, 0, 0, 0, 0,-5],
-      [ 5,10,10,10,10,10,10, 5],
-      [ 0, 0, 0, 0, 0, 0, 0, 0],
-    ],
-    Q: [
-      [-20,-10,-10, -5, -5,-10,-10,-20],
-      [-10, 0, 0, 0, 0, 0, 0,-10],
-      [-10, 0, 5, 5, 5, 5, 0,-10],
-      [ -5, 0, 5, 5, 5, 5, 0, -5],
-      [ 0, 0, 5, 5, 5, 5, 0, -5],
-      [-10, 5, 5, 5, 5, 5, 0,-10],
-      [-10, 0, 5, 0, 0, 0, 0,-10],
-      [-20,-10,-10, -5, -5,-10,-10,-20],
-    ],
-    K: [
-      [-30,-40,-40,-50,-50,-40,-40,-30],
-      [-30,-40,-40,-50,-50,-40,-40,-30],
-      [-30,-40,-40,-50,-50,-40,-40,-30],
-      [-30,-40,-40,-50,-50,-40,-40,-30],
-      [-20,-30,-30,-40,-40,-30,-30,-20],
-      [-10,-20,-20,-20,-20,-20,-20,-10],
-      [ 20, 20, 0, 0, 0, 0, 20, 20],
-      [ 20, 30,10, 0, 0,10, 30, 20],
-    ],
-  };
-
-  let S = newGameState();
-  let flipped = false;
-
   function newGameState(){
     return {
-      b: initial(),
+      b: initialBoard(),
       turn: "w",
       castle: { wK:true, wQ:true, bK:true, bQ:true },
       ep: null,
@@ -714,124 +653,11 @@
   const depthSel = document.getElementById("depthSel");
   const botOnSel = document.getElementById("botOnSel");
 
+  let S = newGameState();
+  let flipped = false;
+
   let selected = null;
   let legalForSelected = [];
-
-  function render(){
-    boardEl.innerHTML = "";
-    const b = S.b;
-    const isCheck = inCheck(S, S.turn);
-
-    for(let idx=0; idx<64; idx++){
-      const r0 = Math.floor(idx/8);
-      const c0 = idx%8;
-      const r = flipped ? (7-r0) : r0;
-      const c = flipped ? (7-c0) : c0;
-
-      const sq = document.createElement("div");
-      sq.className = "sq " + (((r0+c0)%2===0) ? "light":"dark");
-      sq.dataset.r = r;
-      sq.dataset.c = c;
-
-      const p = b[r][c];
-      if(p){
-        const col = p[0], type=p[1];
-        const span = document.createElement("span");
-        span.className = "piece " + (col==="w" ? "w" : "b");
-        span.textContent = U[col][type];
-        sq.appendChild(span);
-      }
-
-      if(selected && selected.r===r && selected.c===c) sq.classList.add("sel");
-      for(const mv of legalForSelected){
-        if(mv.to.r===r && mv.to.c===c) sq.classList.add(b[r][c] ? "cap" : "hint");
-      }
-
-      if(isCheck){
-        const kp = findKing(S, S.turn);
-        if(kp && kp.r===r && kp.c===c) sq.classList.add("check");
-      }
-
-      sq.addEventListener("click", onSquareClick);
-      boardEl.appendChild(sq);
-    }
-
-    const end = gameStatus(S);
-    let line = `Turn: ${S.turn==="w" ? "White" : "Black"}\n`;
-    if(end.over) line += end.message;
-    else{
-      line += (inCheck(S,S.turn) ? "Check!\n" : "");
-      line += `Bot: ${botOnSel.value==="on" ? "On" : "Off"} | Depth: ${depthSel.value}`;
-    }
-    statusEl.textContent = line;
-
-    undoBtn.disabled = (S.history.length===0);
-    renderMoves();
-  }
-
-  function renderMoves(){
-    let out = "";
-    for(let i=0;i<S.moveList.length;i++){
-      if(i%2===0) out += `${1 + (i/2)}. `;
-      out += S.moveList[i] + (i%2===0 ? " " : "\n");
-    }
-    movesEl.textContent = out.trim() || "Moves will appear here.";
-  }
-
-  function onSquareClick(e){
-    const r = +e.currentTarget.dataset.r;
-    const c = +e.currentTarget.dataset.c;
-    const p = S.b[r][c];
-
-    const end = gameStatus(S);
-    if(end.over) return;
-    if(S.turn==="b" && botOnSel.value==="on") return;
-
-    if(selected){
-      const mv = legalForSelected.find(m => m.to.r===r && m.to.c===c);
-      if(mv){
-        makeMove(S, mv, true);
-        selected = null;
-        legalForSelected = [];
-        render();
-        maybeBotMove();
-        return;
-      }
-      if(p && p[0]===S.turn){
-        selected = {r,c};
-        legalForSelected = legalMovesFrom(S, r, c);
-        render();
-        return;
-      }
-      selected = null;
-      legalForSelected = [];
-      render();
-      return;
-    } else {
-      if(p && p[0]===S.turn){
-        selected = {r,c};
-        legalForSelected = legalMovesFrom(S, r, c);
-        render();
-      }
-    }
-  }
-
-  newBtn.addEventListener("click", () => {
-    S = newGameState();
-    selected = null;
-    legalForSelected = [];
-    render();
-    maybeBotMove();
-  });
-  undoBtn.addEventListener("click", () => {
-    undo(S);
-    selected = null;
-    legalForSelected = [];
-    render();
-  });
-  flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
-  depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
-  botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
   function inside(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
 
@@ -855,6 +681,7 @@
 
   function isSquareAttacked(state, r, c, byColor){
     const b = state.b;
+
     const dir = (byColor==="w") ? -1 : 1;
     const pr = r - dir;
     for(const dc of [-1, +1]){
@@ -1268,6 +1095,122 @@
       }
     }, 60);
   }
+
+  function renderMoves(){
+    let out = "";
+    for(let i=0;i<S.moveList.length;i++){
+      if(i%2===0) out += `${1 + (i/2)}. `;
+      out += S.moveList[i] + (i%2===0 ? " " : "\n");
+    }
+    movesEl.textContent = out.trim() || "Moves will appear here.";
+  }
+
+  function render(){
+    boardEl.innerHTML = "";
+    const b = S.b;
+    const isCheck = inCheck(S, S.turn);
+
+    for(let idx=0; idx<64; idx++){
+      const r0 = Math.floor(idx/8);
+      const c0 = idx%8;
+      const r = flipped ? (7-r0) : r0;
+      const c = flipped ? (7-c0) : c0;
+
+      const sq = document.createElement("div");
+      sq.className = "sq " + (((r0+c0)%2===0) ? "light":"dark");
+      sq.dataset.r = r;
+      sq.dataset.c = c;
+
+      const p = b[r][c];
+      if(p){
+        const col = p[0], type=p[1];
+        const span = document.createElement("span");
+        span.className = "piece " + (col==="w" ? "w" : "b");
+        span.textContent = UPIECES[col][type];
+        sq.appendChild(span);
+      }
+
+      if(selected && selected.r===r && selected.c===c) sq.classList.add("sel");
+      for(const mv of legalForSelected){
+        if(mv.to.r===r && mv.to.c===c) sq.classList.add(b[r][c] ? "cap" : "hint");
+      }
+
+      if(isCheck){
+        const kp = findKing(S, S.turn);
+        if(kp && kp.r===r && kp.c===c) sq.classList.add("check");
+      }
+
+      sq.addEventListener("click", onSquareClick);
+      boardEl.appendChild(sq);
+    }
+
+    const end = gameStatus(S);
+    let line = `Turn: ${S.turn==="w" ? "White" : "Black"}\n`;
+    if(end.over) line += end.message;
+    else{
+      line += (inCheck(S,S.turn) ? "Check!\n" : "");
+      line += `Bot: ${botOnSel.value==="on" ? "On" : "Off"} | Depth: ${depthSel.value}`;
+    }
+    statusEl.textContent = line;
+
+    undoBtn.disabled = (S.history.length===0);
+    renderMoves();
+  }
+
+  function onSquareClick(e){
+    const r = +e.currentTarget.dataset.r;
+    const c = +e.currentTarget.dataset.c;
+    const p = S.b[r][c];
+
+    const end = gameStatus(S);
+    if(end.over) return;
+    if(S.turn==="b" && botOnSel.value==="on") return;
+
+    if(selected){
+      const mv = legalForSelected.find(m => m.to.r===r && m.to.c===c);
+      if(mv){
+        makeMove(S, mv, true);
+        selected = null;
+        legalForSelected = [];
+        render();
+        maybeBotMove();
+        return;
+      }
+      if(p && p[0]===S.turn){
+        selected = {r,c};
+        legalForSelected = legalMovesFrom(S, r, c);
+        render();
+        return;
+      }
+      selected = null;
+      legalForSelected = [];
+      render();
+      return;
+    } else {
+      if(p && p[0]===S.turn){
+        selected = {r,c};
+        legalForSelected = legalMovesFrom(S, r, c);
+        render();
+      }
+    }
+  }
+
+  newBtn.addEventListener("click", () => {
+    S = newGameState();
+    selected = null;
+    legalForSelected = [];
+    render();
+    maybeBotMove();
+  });
+  undoBtn.addEventListener("click", () => {
+    undo(S);
+    selected = null;
+    legalForSelected = [];
+    render();
+  });
+  flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
+  depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
+  botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
   render();
 })();
