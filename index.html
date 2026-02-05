@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Chess vs Bot (No Layout Shift)</title>
+  <title>Chess vs Bot (Locked Squares)</title>
 
   <style>
-    /* ---------- NO LAYOUT SHIFT GUARANTEES ---------- */
-    html { overflow-y: scroll; } /* reserve scrollbar width always (desktop) */
+    /* ====== ABSOLUTE NO-SHIFT BASELINE ====== */
+    html { overflow-y: scroll; overflow-x: hidden; }
+    body { margin:0; overflow-x: hidden; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body { margin:0; }
-    /* ------------------------------------------------ */
+    /* ======================================= */
 
     :root{
       --light:#f0d9b5;
@@ -20,9 +20,13 @@
       --text:#e7eaf0;
       --bg:#0f1220;
 
-      /* These get set by JS to exact integer pixels */
-      --board: 520px;
+      /* INTERNAL board is ALWAYS 520x520, 65px squares */
       --sq: 65px;
+      --board: 520px;
+
+      /* We SCALE the whole board uniformly (no per-square rounding jitter) */
+      --scale: 1;
+      --scaledBoard: 520px; /* set by JS so layout reserves exact space */
       --gap: 14px;
     }
 
@@ -40,7 +44,7 @@
       justify-content:center;
     }
 
-    /* Desktop: row. Phone: column. */
+    /* Desktop row; phone column */
     .wrap{
       width: min(1100px, 100%);
       display:flex;
@@ -52,7 +56,14 @@
       .wrap{ flex-direction: row; flex-wrap: nowrap; }
     }
 
-    /* Fixed board size driven by JS (integer px -> no rounding jitter) */
+    /* Board wrapper reserves exact space so nothing moves when we redraw */
+    .board-wrap{
+      width: var(--scaledBoard);
+      height: var(--scaledBoard);
+      flex: 0 0 auto;
+    }
+
+    /* The real board is fixed pixel grid and gets uniformly scaled */
     .board{
       width: var(--board);
       height: var(--board);
@@ -65,7 +76,10 @@
       box-shadow: 0 18px 50px rgba(0,0,0,.45);
       user-select:none;
       touch-action: manipulation;
-      flex: 0 0 auto; /* never shrink */
+
+      transform: scale(var(--scale));
+      transform-origin: top left;
+      will-change: transform;
     }
 
     .sq{
@@ -76,7 +90,7 @@
       justify-content:center;
       cursor:pointer;
       position:relative;
-      font-size: calc(var(--sq) * 0.68);
+      font-size: 44px; /* fixed; scaled with board */
       line-height: 1;
       font-family: "Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",system-ui,sans-serif;
     }
@@ -86,20 +100,17 @@
 
     .sq.sel{ outline: 4px solid var(--sel); outline-offset:-4px; }
 
-    /* move hints */
     .sq.hint::after{
       content:"";
-      width: calc(var(--sq) * 0.22);
-      height: calc(var(--sq) * 0.22);
+      width: 16px; height:16px;
       background: rgba(0,0,0,.25);
       border-radius: 50%;
       position:absolute;
     }
     .sq.cap::after{
       content:"";
-      width: calc(var(--sq) * 0.70);
-      height: calc(var(--sq) * 0.70);
-      border: calc(var(--sq) * 0.06) solid rgba(0,0,0,.28);
+      width: 46px; height:46px;
+      border: 4px solid rgba(0,0,0,.28);
       border-radius: 50%;
       position:absolute;
       box-sizing:border-box;
@@ -173,7 +184,7 @@
       white-space:pre-wrap;
     }
 
-    /* IMPORTANT: always show scroll gutter to prevent width changes */
+    /* Always-reserved scrollbar space => zero width-jitter */
     .moves{
       margin-top:10px;
       padding:10px 12px;
@@ -181,8 +192,8 @@
       border:1px solid rgba(255,255,255,.10);
       border-radius:10px;
       max-height: 240px;
-      overflow-y: scroll;          /* always reserve scrollbar space */
-      scrollbar-gutter: stable;    /* modern browsers */
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px;
       line-height:1.4;
@@ -205,9 +216,11 @@
 <body>
   <div class="wrap">
     <div>
-      <div id="board" class="board" aria-label="Chess board"></div>
+      <div class="board-wrap">
+        <div id="board" class="board" aria-label="Chess board"></div>
+      </div>
       <div class="small" style="margin-top:10px; opacity:.85;">
-        Tap/click piece → tap/click destination. You are White. Bot is Black.
+        Click/tap piece → click/tap destination. You are White. Bot is Black.
       </div>
     </div>
 
@@ -239,38 +252,49 @@
       <div class="moves" id="moves"></div>
 
       <div class="small" style="margin-top:10px;">
-        Layout is locked: integer-pixel squares + stable scrollbars.
+        This version keeps the board internally fixed and only scales the entire board uniformly.
       </div>
     </div>
   </div>
 
 <script>
 (() => {
-  /* ======= HARD FIX: integer-pixel board sizing (prevents rounding jitter) ======= */
-  function setBoardSize(){
-    // Available width inside body padding. Use 92vw-ish but keep integer multiple of 8.
+  /* ========= SCALE BOARD UNIFORMLY (NO GRID ROUNDING JITTER) ========= */
+  function setScale(){
+    const BASE = 520;
+
+    // width available in current layout:
+    // - phone: use almost full viewport width
+    // - desktop: board column has room; keep <= 1
     const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
     const vh = Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight);
 
-    // On phones, keep it under viewport height so panel is still visible. On desktop, cap 520.
-    const target = Math.min(520, Math.floor(vw * 0.92), Math.floor(vh * 0.62));
-    const board = Math.max(240, Math.floor(target / 8) * 8); // multiple of 8
-    const sq = board / 8;
+    // Aim for max width on small screens; also keep some vertical room.
+    const maxW = Math.floor(vw * 0.92);
+    const maxH = Math.floor(vh * 0.62);
+    const target = Math.min(BASE, maxW, maxH);
 
-    document.documentElement.style.setProperty("--board", board + "px");
-    document.documentElement.style.setProperty("--sq", sq + "px");
+    // Uniform scale, clamped
+    const scale = Math.max(0.45, Math.min(1, target / BASE));
+
+    // Reserve exact integer pixels for the scaled board wrapper so layout never “wiggles”
+    const scaled = Math.round(BASE * scale);
+
+    document.documentElement.style.setProperty("--scale", String(scale));
+    document.documentElement.style.setProperty("--scaledBoard", scaled + "px");
   }
 
-  setBoardSize();
-  window.addEventListener("resize", setBoardSize, {passive:true});
-  window.addEventListener("orientationchange", () => setTimeout(setBoardSize, 50), {passive:true});
+  setScale();
+  window.addEventListener("resize", setScale, {passive:true});
+  window.addEventListener("orientationchange", () => setTimeout(setScale, 60), {passive:true});
 
-  /* ======= Chess engine/UI ======= */
+  // ========= Unicode pieces =========
   const U = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
   };
 
+  // Board: 8x8, [r][c], r=0 is rank 8, c=0 is file a.
   const initial = () => ([
     ["bR","bN","bB","bQ","bK","bB","bN","bR"],
     ["bP","bP","bP","bP","bP","bP","bP","bP"],
@@ -284,6 +308,7 @@
 
   const pieceVal = { P:100, N:320, B:330, R:500, Q:900, K:20000 };
 
+  // Small PST (white perspective). Black mirrored.
   const PST = {
     P: [
       [ 0, 0, 0, 0, 0, 0, 0, 0],
@@ -376,6 +401,7 @@
   let legalForSelected = [];
 
   function render(){
+    // (Rebuilding the board does NOT change layout now because wrapper size is fixed.)
     boardEl.innerHTML = "";
     const b = S.b;
     const isCheck = inCheck(S, S.turn);
@@ -488,10 +514,7 @@
     legalForSelected = [];
     render();
   });
-  flipBtn.addEventListener("click", () => {
-    flipped = !flipped;
-    render();
-  });
+  flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
   depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
   botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
