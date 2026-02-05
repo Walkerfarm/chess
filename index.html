@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Chess vs Bot</title>
+  <title>Chess</title>
 
   <style>
     html { overflow-y: scroll; overflow-x: hidden; }
@@ -544,7 +544,6 @@
 
     chimeTimer = setInterval(() => {
       if(!musicOn) return;
-
       if(Math.random() < 0.28) return; // sparse
 
       let idx = Math.floor(Math.random() * pool.length);
@@ -631,6 +630,71 @@
     ["wR","wN","wB","wQ","wK","wB","wN","wR"]
   ]);
 
+  const pieceVal = { P:100, N:320, B:330, R:500, Q:900, K:20000 };
+
+  const PST = {
+    P: [
+      [ 0, 0, 0, 0, 0, 0, 0, 0],
+      [ 5,10,10,-20,-20,10,10, 5],
+      [ 5,-5,-10, 0, 0,-10,-5, 5],
+      [ 0, 0, 0, 20, 20, 0, 0, 0],
+      [ 5, 5,10, 25, 25,10, 5, 5],
+      [10,10,20, 30, 30,20,10,10],
+      [50,50,50, 50, 50,50,50,50],
+      [ 0, 0, 0, 0, 0, 0, 0, 0],
+    ],
+    N: [
+      [-50,-40,-30,-30,-30,-30,-40,-50],
+      [-40,-20, 0, 0, 0, 0,-20,-40],
+      [-30, 0,10,15,15,10, 0,-30],
+      [-30, 5,15,20,20,15, 5,-30],
+      [-30, 0,15,20,20,15, 0,-30],
+      [-30, 5,10,15,15,10, 5,-30],
+      [-40,-20, 0, 5, 5, 0,-20,-40],
+      [-50,-40,-30,-30,-30,-30,-40,-50],
+    ],
+    B: [
+      [-20,-10,-10,-10,-10,-10,-10,-20],
+      [-10, 0, 0, 0, 0, 0, 0,-10],
+      [-10, 0, 5,10,10, 5, 0,-10],
+      [-10, 5, 5,10,10, 5, 5,-10],
+      [-10, 0,10,10,10,10, 0,-10],
+      [-10,10,10,10,10,10,10,-10],
+      [-10, 5, 0, 0, 0, 0, 5,-10],
+      [-20,-10,-10,-10,-10,-10,-10,-20],
+    ],
+    R: [
+      [ 0, 0, 0, 5, 5, 0, 0, 0],
+      [-5, 0, 0, 0, 0, 0, 0,-5],
+      [-5, 0, 0, 0, 0, 0, 0,-5],
+      [-5, 0, 0, 0, 0, 0, 0,-5],
+      [-5, 0, 0, 0, 0, 0, 0,-5],
+      [-5, 0, 0, 0, 0, 0, 0,-5],
+      [ 5,10,10,10,10,10,10, 5],
+      [ 0, 0, 0, 0, 0, 0, 0, 0],
+    ],
+    Q: [
+      [-20,-10,-10, -5, -5,-10,-10,-20],
+      [-10, 0, 0, 0, 0, 0, 0,-10],
+      [-10, 0, 5, 5, 5, 5, 0,-10],
+      [ -5, 0, 5, 5, 5, 5, 0, -5],
+      [ 0, 0, 5, 5, 5, 5, 0, -5],
+      [-10, 5, 5, 5, 5, 5, 0,-10],
+      [-10, 0, 5, 0, 0, 0, 0,-10],
+      [-20,-10,-10, -5, -5,-10,-10,-20],
+    ],
+    K: [
+      [-30,-40,-40,-50,-50,-40,-40,-30],
+      [-30,-40,-40,-50,-50,-40,-40,-30],
+      [-30,-40,-40,-50,-50,-40,-40,-30],
+      [-30,-40,-40,-50,-50,-40,-40,-30],
+      [-20,-30,-30,-40,-40,-30,-30,-20],
+      [-10,-20,-20,-20,-20,-20,-20,-10],
+      [ 20, 20, 0, 0, 0, 0, 20, 20],
+      [ 20, 30,10, 0, 0,10, 30, 20],
+    ],
+  };
+
   function newGameState(){
     return {
       b: initialBoard(),
@@ -658,6 +722,127 @@
 
   let selected = null;
   let legalForSelected = [];
+  let botBusy = false;
+
+  function renderMoves(){
+    let out = "";
+    for(let i=0;i<S.moveList.length;i++){
+      if(i%2===0) out += `${1 + (i/2)}. `;
+      out += S.moveList[i] + (i%2===0 ? " " : "\n");
+    }
+    movesEl.textContent = out.trim() || "Moves will appear here.";
+  }
+
+  function render(){
+    boardEl.innerHTML = "";
+    const b = S.b;
+    const isCheck = inCheck(S, S.turn);
+
+    for(let idx=0; idx<64; idx++){
+      const r0 = Math.floor(idx/8);
+      const c0 = idx%8;
+      const r = flipped ? (7-r0) : r0;
+      const c = flipped ? (7-c0) : c0;
+
+      const sq = document.createElement("div");
+      sq.className = "sq " + (((r0+c0)%2===0) ? "light":"dark");
+      sq.dataset.r = r;
+      sq.dataset.c = c;
+
+      const p = b[r][c];
+      if(p){
+        const col = p[0], type=p[1];
+        const span = document.createElement("span");
+        span.className = "piece " + (col==="w" ? "w" : "b");
+        span.textContent = UPIECES[col][type];
+        sq.appendChild(span);
+      }
+
+      if(selected && selected.r===r && selected.c===c) sq.classList.add("sel");
+      for(const mv of legalForSelected){
+        if(mv.to.r===r && mv.to.c===c) sq.classList.add(b[r][c] ? "cap" : "hint");
+      }
+
+      if(isCheck){
+        const kp = findKing(S, S.turn);
+        if(kp && kp.r===r && kp.c===c) sq.classList.add("check");
+      }
+
+      sq.addEventListener("click", onSquareClick);
+      boardEl.appendChild(sq);
+    }
+
+    const end = gameStatus(S);
+    let line = `Turn: ${S.turn==="w" ? "White" : "Black"}\n`;
+    if(end.over) line += end.message;
+    else{
+      line += (inCheck(S,S.turn) ? "Check!\n" : "");
+      line += `Bot: ${botOnSel.value==="on" ? "On" : "Off"} | Depth: ${depthSel.value}` + (botBusy ? " | Thinking..." : "");
+    }
+    statusEl.textContent = line;
+
+    undoBtn.disabled = (S.history.length===0);
+    renderMoves();
+  }
+
+  function onSquareClick(e){
+    if(botBusy) return;
+
+    const r = +e.currentTarget.dataset.r;
+    const c = +e.currentTarget.dataset.c;
+    const p = S.b[r][c];
+
+    const end = gameStatus(S);
+    if(end.over) return;
+    if(S.turn==="b" && botOnSel.value==="on") return;
+
+    if(selected){
+      const mv = legalForSelected.find(m => m.to.r===r && m.to.c===c);
+      if(mv){
+        makeMove(S, mv, true);
+        selected = null;
+        legalForSelected = [];
+        render();
+        maybeBotMove();
+        return;
+      }
+      if(p && p[0]===S.turn){
+        selected = {r,c};
+        legalForSelected = legalMovesFrom(S, r, c);
+        render();
+        return;
+      }
+      selected = null;
+      legalForSelected = [];
+      render();
+      return;
+    } else {
+      if(p && p[0]===S.turn){
+        selected = {r,c};
+        legalForSelected = legalMovesFrom(S, r, c);
+        render();
+      }
+    }
+  }
+
+  newBtn.addEventListener("click", () => {
+    S = newGameState();
+    selected = null;
+    legalForSelected = [];
+    botBusy = false;
+    render();
+    maybeBotMove();
+  });
+  undoBtn.addEventListener("click", () => {
+    if(botBusy) return;
+    undo(S);
+    selected = null;
+    legalForSelected = [];
+    render();
+  });
+  flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
+  depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
+  botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
   function inside(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
 
@@ -677,65 +862,6 @@
   function findKing(state, color){
     for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(state.b[r][c]===color+"K") return {r,c};
     return null;
-  }
-
-  function isSquareAttacked(state, r, c, byColor){
-    const b = state.b;
-
-    const dir = (byColor==="w") ? -1 : 1;
-    const pr = r - dir;
-    for(const dc of [-1, +1]){
-      const pc = c - dc;
-      if(inside(pr,pc) && b[pr][pc]===byColor+"P") return true;
-    }
-
-    const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-    for(const [dr,dc] of KN){
-      const rr=r+dr, cc=c+dc;
-      if(inside(rr,cc) && b[rr][cc]===byColor+"N") return true;
-    }
-
-    const diag = [[-1,-1],[-1,1],[1,-1],[1,1]];
-    for(const [dr,dc] of diag){
-      let rr=r+dr, cc=c+dc;
-      while(inside(rr,cc)){
-        const p=b[rr][cc];
-        if(p){
-          if(p[0]===byColor && (p[1]==="B" || p[1]==="Q")) return true;
-          break;
-        }
-        rr+=dr; cc+=dc;
-      }
-    }
-
-    const ort = [[-1,0],[1,0],[0,-1],[0,1]];
-    for(const [dr,dc] of ort){
-      let rr=r+dr, cc=c+dc;
-      while(inside(rr,cc)){
-        const p=b[rr][cc];
-        if(p){
-          if(p[0]===byColor && (p[1]==="R" || p[1]==="Q")) return true;
-          break;
-        }
-        rr+=dr; cc+=dc;
-      }
-    }
-
-    for(let dr=-1; dr<=1; dr++){
-      for(let dc=-1; dc<=1; dc++){
-        if(dr===0 && dc===0) continue;
-        const rr=r+dr, cc=c+dc;
-        if(inside(rr,cc) && b[rr][cc]===byColor+"K") return true;
-      }
-    }
-    return false;
-  }
-
-  function inCheck(state, color){
-    const k = findKing(state, color);
-    if(!k) return false;
-    const opp = (color==="w") ? "b" : "w";
-    return isSquareAttacked(state, k.r, k.c, opp);
   }
 
   function pseudoMovesFrom(state, r, c){
@@ -858,6 +984,65 @@
     return out;
   }
 
+  function isSquareAttacked(state, r, c, byColor){
+    const b = state.b;
+
+    const dir = (byColor==="w") ? -1 : 1;
+    const pr = r - dir;
+    for(const dc of [-1, +1]){
+      const pc = c - dc;
+      if(inside(pr,pc) && b[pr][pc]===byColor+"P") return true;
+    }
+
+    const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+    for(const [dr,dc] of KN){
+      const rr=r+dr, cc=c+dc;
+      if(inside(rr,cc) && b[rr][cc]===byColor+"N") return true;
+    }
+
+    const diag = [[-1,-1],[-1,1],[1,-1],[1,1]];
+    for(const [dr,dc] of diag){
+      let rr=r+dr, cc=c+dc;
+      while(inside(rr,cc)){
+        const p=b[rr][cc];
+        if(p){
+          if(p[0]===byColor && (p[1]==="B" || p[1]==="Q")) return true;
+          break;
+        }
+        rr+=dr; cc+=dc;
+      }
+    }
+
+    const ort = [[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of ort){
+      let rr=r+dr, cc=c+dc;
+      while(inside(rr,cc)){
+        const p=b[rr][cc];
+        if(p){
+          if(p[0]===byColor && (p[1]==="R" || p[1]==="Q")) return true;
+          break;
+        }
+        rr+=dr; cc+=dc;
+      }
+    }
+
+    for(let dr=-1; dr<=1; dr++){
+      for(let dc=-1; dc<=1; dc++){
+        if(dr===0 && dc===0) continue;
+        const rr=r+dr, cc=c+dc;
+        if(inside(rr,cc) && b[rr][cc]===byColor+"K") return true;
+      }
+    }
+    return false;
+  }
+
+  function inCheck(state, color){
+    const k = findKing(state, color);
+    if(!k) return false;
+    const opp = (color==="w") ? "b" : "w";
+    return isSquareAttacked(state, k.r, k.c, opp);
+  }
+
   function applyMove(state, mv){
     const b = state.b;
     const {from,to} = mv;
@@ -946,6 +1131,16 @@
 
   function sqName(r,c){ return "abcdefgh"[c] + (8-r); }
 
+  function checkSuffixAfter(state, mv){
+    const st2 = applyMove(cloneState(state), mv);
+    const opp = st2.turn;
+    const checked = inCheck(st2, opp);
+    const moves = allLegalMoves(st2);
+    if(checked && moves.length===0) return "#";
+    if(checked) return "+";
+    return "";
+  }
+
   function moveToSAN(state, mv){
     if(mv.castle) return (mv.castle==="K") ? "O-O" : "O-O-O";
     const piece = mv.piece;
@@ -977,16 +1172,6 @@
       const pawnPrefix = capture ? ("abcdefgh"[mv.from.c]) : "";
       return pawnPrefix + capture + to + (mv.promote ? "="+mv.promote : "") + checkSuffixAfter(state, mv);
     }
-  }
-
-  function checkSuffixAfter(state, mv){
-    const st2 = applyMove(cloneState(state), mv);
-    const opp = st2.turn;
-    const checked = inCheck(st2, opp);
-    const moves = allLegalMoves(st2);
-    if(checked && moves.length===0) return "#";
-    if(checked) return "+";
-    return "";
   }
 
   function gameStatus(state){
@@ -1083,134 +1268,33 @@
   function maybeBotMove(){
     const end = gameStatus(S);
     if(end.over) { render(); return; }
-    if(botOnSel.value!=="on") return;
-    if(S.turn!=="b") return;
+    if(botOnSel.value !== "on") return;
+    if(S.turn !== "b") return;
+    if(botBusy) return;
 
-    setTimeout(() => {
-      const depth = Math.max(1, Math.min(4, parseInt(depthSel.value,10)));
-      const mv = botBestMove(S, depth);
-      if(mv){
-        makeMove(S, mv, true);
-        render();
-      }
-    }, 60);
+    botBusy = true;
+
+    statusEl.textContent =
+      `Turn: Black\nBot thinking...\nBot: On | Depth: ${depthSel.value}`;
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try{
+          let depth = Math.max(1, Math.min(4, parseInt(depthSel.value, 10) || 2));
+          if(/iPhone|iPad|iPod/i.test(navigator.userAgent)) depth = Math.min(depth, 3);
+
+          const mv = botBestMove(S, depth);
+          if(mv) makeMove(S, mv, true);
+        } catch (err){
+          console.error("Bot error:", err);
+          alert("Bot engine error. Check the console on PC for details.");
+        } finally {
+          botBusy = false;
+          render();
+        }
+      }, 0);
+    });
   }
-
-  function renderMoves(){
-    let out = "";
-    for(let i=0;i<S.moveList.length;i++){
-      if(i%2===0) out += `${1 + (i/2)}. `;
-      out += S.moveList[i] + (i%2===0 ? " " : "\n");
-    }
-    movesEl.textContent = out.trim() || "Moves will appear here.";
-  }
-
-  function render(){
-    boardEl.innerHTML = "";
-    const b = S.b;
-    const isCheck = inCheck(S, S.turn);
-
-    for(let idx=0; idx<64; idx++){
-      const r0 = Math.floor(idx/8);
-      const c0 = idx%8;
-      const r = flipped ? (7-r0) : r0;
-      const c = flipped ? (7-c0) : c0;
-
-      const sq = document.createElement("div");
-      sq.className = "sq " + (((r0+c0)%2===0) ? "light":"dark");
-      sq.dataset.r = r;
-      sq.dataset.c = c;
-
-      const p = b[r][c];
-      if(p){
-        const col = p[0], type=p[1];
-        const span = document.createElement("span");
-        span.className = "piece " + (col==="w" ? "w" : "b");
-        span.textContent = UPIECES[col][type];
-        sq.appendChild(span);
-      }
-
-      if(selected && selected.r===r && selected.c===c) sq.classList.add("sel");
-      for(const mv of legalForSelected){
-        if(mv.to.r===r && mv.to.c===c) sq.classList.add(b[r][c] ? "cap" : "hint");
-      }
-
-      if(isCheck){
-        const kp = findKing(S, S.turn);
-        if(kp && kp.r===r && kp.c===c) sq.classList.add("check");
-      }
-
-      sq.addEventListener("click", onSquareClick);
-      boardEl.appendChild(sq);
-    }
-
-    const end = gameStatus(S);
-    let line = `Turn: ${S.turn==="w" ? "White" : "Black"}\n`;
-    if(end.over) line += end.message;
-    else{
-      line += (inCheck(S,S.turn) ? "Check!\n" : "");
-      line += `Bot: ${botOnSel.value==="on" ? "On" : "Off"} | Depth: ${depthSel.value}`;
-    }
-    statusEl.textContent = line;
-
-    undoBtn.disabled = (S.history.length===0);
-    renderMoves();
-  }
-
-  function onSquareClick(e){
-    const r = +e.currentTarget.dataset.r;
-    const c = +e.currentTarget.dataset.c;
-    const p = S.b[r][c];
-
-    const end = gameStatus(S);
-    if(end.over) return;
-    if(S.turn==="b" && botOnSel.value==="on") return;
-
-    if(selected){
-      const mv = legalForSelected.find(m => m.to.r===r && m.to.c===c);
-      if(mv){
-        makeMove(S, mv, true);
-        selected = null;
-        legalForSelected = [];
-        render();
-        maybeBotMove();
-        return;
-      }
-      if(p && p[0]===S.turn){
-        selected = {r,c};
-        legalForSelected = legalMovesFrom(S, r, c);
-        render();
-        return;
-      }
-      selected = null;
-      legalForSelected = [];
-      render();
-      return;
-    } else {
-      if(p && p[0]===S.turn){
-        selected = {r,c};
-        legalForSelected = legalMovesFrom(S, r, c);
-        render();
-      }
-    }
-  }
-
-  newBtn.addEventListener("click", () => {
-    S = newGameState();
-    selected = null;
-    legalForSelected = [];
-    render();
-    maybeBotMove();
-  });
-  undoBtn.addEventListener("click", () => {
-    undo(S);
-    selected = null;
-    legalForSelected = [];
-    render();
-  });
-  flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
-  depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
-  botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
 
   render();
 })();
