@@ -18,11 +18,9 @@
       --text:#e7eaf0;
       --bg:#0f1220;
 
-      /* internal fixed board */
       --sq: 65px;
       --board: 520px;
 
-      /* uniform scale for any screen size */
       --scale: 1;
       --scaledBoard: 520px;
       --gap: 14px;
@@ -42,7 +40,6 @@
       justify-content:center;
     }
 
-    /* Rotate the whole app (manual or auto 180° flip) */
     #app{
       transform: rotate(0deg);
       transform-origin: center center;
@@ -92,7 +89,7 @@
       justify-content:center;
       cursor:pointer;
       position:relative;
-      font-size: 44px; /* fixed, scaled with board */
+      font-size: 44px;
       line-height: 1;
       font-family: "Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",system-ui,sans-serif;
     }
@@ -118,7 +115,6 @@
     }
     .sq.check{ box-shadow: inset 0 0 0 6px rgba(255,0,0,.35); }
 
-    /* 3D-ish pieces */
     .piece{
       display:inline-block;
       transform: translateY(-1px);
@@ -154,7 +150,7 @@
       flex: 0 0 auto;
     }
     @media (min-width: 900px){
-      .panel{ width: 400px; flex: 0 0 400px; }
+      .panel{ width: 420px; flex: 0 0 420px; }
     }
 
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -234,19 +230,26 @@
         </div>
 
         <div class="row" style="margin-top:10px;">
-          <span class="tag">Bot strength:
-            <select id="depthSel">
-              <option value="1">Very Easy (Depth 1)</option>
-              <option value="2" selected>Easy (Depth 2)</option>
-              <option value="3">Medium (Depth 3)</option>
-              <option value="4">Hard (Depth 4)</option>
+          <span class="tag">Mode:
+            <select id="modeSel">
+              <option value="bot" selected>Vs Bot</option>
+              <option value="two">Two Player</option>
             </select>
           </span>
 
-          <span class="tag">Bot:
-            <select id="botOnSel">
-              <option value="on" selected>On</option>
-              <option value="off">Off</option>
+          <span class="tag">You play:
+            <select id="youSel">
+              <option value="w" selected>White</option>
+              <option value="b">Black</option>
+            </select>
+          </span>
+
+          <span class="tag">Bot depth:
+            <select id="depthSel">
+              <option value="1">Very Easy (1)</option>
+              <option value="2" selected>Easy (2)</option>
+              <option value="3">Medium (3)</option>
+              <option value="4">Hard (4)</option>
             </select>
           </span>
 
@@ -263,7 +266,7 @@
         <div class="moves" id="moves"></div>
 
         <div class="small" style="margin-top:10px;">
-          Audio starts only after a tap on iPhone. Music toggle fully stops (fade out + stop sources).
+          Chess starts with White to move. If you choose “You play: Black”, the bot will make White’s first move.
         </div>
       </div>
     </div>
@@ -271,7 +274,7 @@
 
 <script>
 (() => {
-  /* ========= Uniform scale for any rotation ========= */
+  /* ========= Uniform scale ========= */
   function setScale(){
     const BASE = 520;
     const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
@@ -314,8 +317,6 @@
 
   async function requestMotionPermission(){
     if (typeof DeviceMotionEvent === "undefined") return false;
-
-    // iOS requires permission
     if (typeof DeviceMotionEvent.requestPermission === "function") {
       try{
         const res = await DeviceMotionEvent.requestPermission();
@@ -336,9 +337,8 @@
       const vh = window.innerHeight;
       const landscape = vw > vh;
 
-      const TH = 7.0; // threshold against ~9.8 gravity
+      const TH = 7.0;
 
-      // Use y in portrait, x in landscape. Flip when strongly inverted.
       if(!landscape){
         if (g.y <= -TH) applyFlip(180);
         else if (g.y >= TH) applyFlip(0);
@@ -365,8 +365,8 @@
       if(!ok){
         alert(
           "Auto 180° Flip needs Motion access.\n\n" +
-          "If you tapped 'Don't Allow' earlier, Safari may remember it.\n" +
-          "Try: Settings → Safari → Clear History and Website Data, then reload and tap Auto Flip again."
+          "If you previously tapped 'Don't Allow', Safari may remember it.\n" +
+          "Try: Settings → Safari → Clear History and Website Data, then reload and try again."
         );
         return;
       }
@@ -380,7 +380,7 @@
     }
   });
 
-  /* ========= Peaceful music (soft pad + sparse chimes) ========= */
+  /* ========= Peaceful music ========= */
   const musicBtn = document.getElementById("musicBtn");
   const volSel = document.getElementById("volSel");
 
@@ -393,7 +393,6 @@
   let padOscs = [];
   let chimeTimer = null;
 
-  // internal routing helpers
   let dryIn = null;
   let wetIn = null;
 
@@ -416,7 +415,6 @@
 
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // final output gain: THIS makes Off truly silent
     outGain = audioCtx.createGain();
     outGain.gain.value = 0.0;
     outGain.connect(audioCtx.destination);
@@ -426,7 +424,6 @@
     dryIn.gain.value = 1.0;
     wetIn.gain.value = 1.0;
 
-    // Gentle reverb + echo
     const convolver = audioCtx.createConvolver();
     convolver.buffer = createImpulseResponse(audioCtx);
 
@@ -443,7 +440,6 @@
     const dryOut = audioCtx.createGain();
     dryOut.gain.value = 0.75;
 
-    // route wet
     wetIn.connect(convolver);
     convolver.connect(wetOut);
     wetOut.connect(outGain);
@@ -451,11 +447,9 @@
     wetIn.connect(delay);
     delay.connect(wetOut);
 
-    // route dry
     dryIn.connect(dryOut);
     dryOut.connect(outGain);
 
-    // pad chain
     padGain = audioCtx.createGain();
     padGain.gain.value = 0.08;
 
@@ -470,8 +464,7 @@
   }
 
   function startPad(){
-    // A minor calm pad: A3 C4 E4 (soft)
-    const freqs = [220.00, 261.63, 329.63];
+    const freqs = [220.00, 261.63, 329.63]; // A3 C4 E4
     padOscs = freqs.map((f, i) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
@@ -485,7 +478,6 @@
       return {o,g};
     });
 
-    // slow “breathing” volume
     const breath = audioCtx.createOscillator();
     const breathGain = audioCtx.createGain();
     breath.type = "sine";
@@ -539,12 +531,12 @@
   }
 
   function startChimes(){
-    const pool = [220, 261.63, 293.66, 329.63, 392.00, 440, 523.25]; // A C D E G (+ octaves)
+    const pool = [220, 261.63, 293.66, 329.63, 392.00, 440, 523.25]; // A C D E G
     let last = -1;
 
     chimeTimer = setInterval(() => {
       if(!musicOn) return;
-      if(Math.random() < 0.28) return; // sparse
+      if(Math.random() < 0.28) return;
 
       let idx = Math.floor(Math.random() * pool.length);
       if(idx === last) idx = (idx + 1) % pool.length;
@@ -581,11 +573,11 @@
       outGain.gain.linearRampToValueAtTime(targetVol, now + 0.8);
     } else {
       musicOn = false;
+
       outGain.gain.cancelScheduledValues(now);
       outGain.gain.setValueAtTime(outGain.gain.value, now);
       outGain.gain.linearRampToValueAtTime(0.0, now + 0.6);
 
-      // HARD STOP sources after fade so it cannot keep playing
       setTimeout(() => {
         stopChimes();
         stopPad();
@@ -613,7 +605,7 @@
     outGain.gain.linearRampToValueAtTime(targetVol, now + 0.25);
   });
 
-  /* ========= Chess engine/UI ========= */
+  /* ========= Chess ========= */
   const UPIECES = {
     w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
     b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
@@ -631,7 +623,6 @@
   ]);
 
   const pieceVal = { P:100, N:320, B:330, R:500, Q:900, K:20000 };
-
   const PST = {
     P: [
       [ 0, 0, 0, 0, 0, 0, 0, 0],
@@ -715,7 +706,8 @@
   const undoBtn = document.getElementById("undoBtn");
   const flipBtn = document.getElementById("flipBtn");
   const depthSel = document.getElementById("depthSel");
-  const botOnSel = document.getElementById("botOnSel");
+  const modeSel = document.getElementById("modeSel");
+  const youSel = document.getElementById("youSel");
 
   let S = newGameState();
   let flipped = false;
@@ -723,6 +715,10 @@
   let selected = null;
   let legalForSelected = [];
   let botBusy = false;
+
+  function isBotOn(){ return modeSel.value === "bot"; }
+  function humanColor(){ return youSel.value; }
+  function botColor(){ return (humanColor() === "w") ? "b" : "w"; }
 
   function renderMoves(){
     let out = "";
@@ -774,14 +770,24 @@
 
     const end = gameStatus(S);
     let line = `Turn: ${S.turn==="w" ? "White" : "Black"}\n`;
-    if(end.over) line += end.message;
-    else{
-      line += (inCheck(S,S.turn) ? "Check!\n" : "");
-      line += `Bot: ${botOnSel.value==="on" ? "On" : "Off"} | Depth: ${depthSel.value}` + (botBusy ? " | Thinking..." : "");
-    }
-    statusEl.textContent = line;
 
-    undoBtn.disabled = (S.history.length===0);
+    if(end.over){
+      line += end.message;
+    } else {
+      if(inCheck(S,S.turn)) line += "Check!\n";
+
+      if(isBotOn()){
+        line += `Mode: Vs Bot (You: ${humanColor()==="w"?"White":"Black"}) | Bot depth: ${depthSel.value}`;
+        if(botBusy) line += " | Bot thinking...";
+        if(S.turn === botColor()) line += "\nBot to move.";
+        else line += "\nYour move.";
+      } else {
+        line += "Mode: Two Player\nTap a piece of the side whose turn it is.";
+      }
+    }
+
+    statusEl.textContent = line;
+    undoBtn.disabled = (S.history.length===0) || botBusy;
     renderMoves();
   }
 
@@ -794,7 +800,9 @@
 
     const end = gameStatus(S);
     if(end.over) return;
-    if(S.turn==="b" && botOnSel.value==="on") return;
+
+    // If bot mode, block human input when it's bot's turn
+    if(isBotOn() && S.turn === botColor()) return;
 
     if(selected){
       const mv = legalForSelected.find(m => m.to.r===r && m.to.c===c);
@@ -825,14 +833,7 @@
     }
   }
 
-  newBtn.addEventListener("click", () => {
-    S = newGameState();
-    selected = null;
-    legalForSelected = [];
-    botBusy = false;
-    render();
-    maybeBotMove();
-  });
+  newBtn.addEventListener("click", () => resetGame(true));
   undoBtn.addEventListener("click", () => {
     if(botBusy) return;
     undo(S);
@@ -842,8 +843,21 @@
   });
   flipBtn.addEventListener("click", () => { flipped = !flipped; render(); });
   depthSel.addEventListener("change", () => { render(); maybeBotMove(); });
-  botOnSel.addEventListener("change", () => { render(); maybeBotMove(); });
+  modeSel.addEventListener("change", () => resetGame(false));
+  youSel.addEventListener("change", () => resetGame(false));
 
+  function resetGame(full){
+    S = newGameState();
+    selected = null;
+    legalForSelected = [];
+    botBusy = false;
+
+    // Optional: if you choose to play as Black vs bot, have bot (White) make first move.
+    render();
+    maybeBotMove();
+  }
+
+  /* ===== Chess rules/engine ===== */
   function inside(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
 
   function cloneState(state){
@@ -862,6 +876,65 @@
   function findKing(state, color){
     for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(state.b[r][c]===color+"K") return {r,c};
     return null;
+  }
+
+  function isSquareAttacked(state, r, c, byColor){
+    const b = state.b;
+
+    const dir = (byColor==="w") ? -1 : 1;
+    const pr = r - dir;
+    for(const dc of [-1, +1]){
+      const pc = c - dc;
+      if(inside(pr,pc) && b[pr][pc]===byColor+"P") return true;
+    }
+
+    const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+    for(const [dr,dc] of KN){
+      const rr=r+dr, cc=c+dc;
+      if(inside(rr,cc) && b[rr][cc]===byColor+"N") return true;
+    }
+
+    const diag = [[-1,-1],[-1,1],[1,-1],[1,1]];
+    for(const [dr,dc] of diag){
+      let rr=r+dr, cc=c+dc;
+      while(inside(rr,cc)){
+        const p=b[rr][cc];
+        if(p){
+          if(p[0]===byColor && (p[1]==="B" || p[1]==="Q")) return true;
+          break;
+        }
+        rr+=dr; cc+=dc;
+      }
+    }
+
+    const ort = [[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of ort){
+      let rr=r+dr, cc=c+dc;
+      while(inside(rr,cc)){
+        const p=b[rr][cc];
+        if(p){
+          if(p[0]===byColor && (p[1]==="R" || p[1]==="Q")) return true;
+          break;
+        }
+        rr+=dr; cc+=dc;
+      }
+    }
+
+    for(let dr=-1; dr<=1; dr++){
+      for(let dc=-1; dc<=1; dc++){
+        if(dr===0 && dc===0) continue;
+        const rr=r+dr, cc=c+dc;
+        if(inside(rr,cc) && b[rr][cc]===byColor+"K") return true;
+      }
+    }
+    return false;
+  }
+
+  function inCheck(state, color){
+    const k = findKing(state, color);
+    if(!k) return false;
+    const opp = (color==="w") ? "b" : "w";
+    return isSquareAttacked(state, k.r, k.c, opp);
   }
 
   function pseudoMovesFrom(state, r, c){
@@ -982,65 +1055,6 @@
       }
     }
     return out;
-  }
-
-  function isSquareAttacked(state, r, c, byColor){
-    const b = state.b;
-
-    const dir = (byColor==="w") ? -1 : 1;
-    const pr = r - dir;
-    for(const dc of [-1, +1]){
-      const pc = c - dc;
-      if(inside(pr,pc) && b[pr][pc]===byColor+"P") return true;
-    }
-
-    const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-    for(const [dr,dc] of KN){
-      const rr=r+dr, cc=c+dc;
-      if(inside(rr,cc) && b[rr][cc]===byColor+"N") return true;
-    }
-
-    const diag = [[-1,-1],[-1,1],[1,-1],[1,1]];
-    for(const [dr,dc] of diag){
-      let rr=r+dr, cc=c+dc;
-      while(inside(rr,cc)){
-        const p=b[rr][cc];
-        if(p){
-          if(p[0]===byColor && (p[1]==="B" || p[1]==="Q")) return true;
-          break;
-        }
-        rr+=dr; cc+=dc;
-      }
-    }
-
-    const ort = [[-1,0],[1,0],[0,-1],[0,1]];
-    for(const [dr,dc] of ort){
-      let rr=r+dr, cc=c+dc;
-      while(inside(rr,cc)){
-        const p=b[rr][cc];
-        if(p){
-          if(p[0]===byColor && (p[1]==="R" || p[1]==="Q")) return true;
-          break;
-        }
-        rr+=dr; cc+=dc;
-      }
-    }
-
-    for(let dr=-1; dr<=1; dr++){
-      for(let dc=-1; dc<=1; dc++){
-        if(dr===0 && dc===0) continue;
-        const rr=r+dr, cc=c+dc;
-        if(inside(rr,cc) && b[rr][cc]===byColor+"K") return true;
-      }
-    }
-    return false;
-  }
-
-  function inCheck(state, color){
-    const k = findKing(state, color);
-    if(!k) return false;
-    const opp = (color==="w") ? "b" : "w";
-    return isSquareAttacked(state, k.r, k.c, opp);
   }
 
   function applyMove(state, mv){
@@ -1268,26 +1282,31 @@
   function maybeBotMove(){
     const end = gameStatus(S);
     if(end.over) { render(); return; }
-    if(botOnSel.value !== "on") return;
-    if(S.turn !== "b") return;
-    if(botBusy) return;
 
+    if(!isBotOn()) return;
+
+    // bot moves only when it's botColor's turn
+    if(S.turn !== botColor()) return;
+
+    if(botBusy) return;
     botBusy = true;
 
+    // show thinking immediately
     statusEl.textContent =
-      `Turn: Black\nBot thinking...\nBot: On | Depth: ${depthSel.value}`;
+      `Turn: ${S.turn==="w" ? "White" : "Black"}\nBot thinking...\nMode: Vs Bot (You: ${humanColor()==="w"?"White":"Black"}) | Bot depth: ${depthSel.value}`;
 
     requestAnimationFrame(() => {
       setTimeout(() => {
         try{
           let depth = Math.max(1, Math.min(4, parseInt(depthSel.value, 10) || 2));
+          // keep iPhone responsive
           if(/iPhone|iPad|iPod/i.test(navigator.userAgent)) depth = Math.min(depth, 3);
 
           const mv = botBestMove(S, depth);
           if(mv) makeMove(S, mv, true);
         } catch (err){
           console.error("Bot error:", err);
-          alert("Bot engine error. Check the console on PC for details.");
+          alert("Bot engine error. (If you can, open the page on PC and check Console for details.)");
         } finally {
           botBusy = false;
           render();
@@ -1296,7 +1315,9 @@
     });
   }
 
+  // Initial render + if playing black vs bot, bot (white) should move first
   render();
+  maybeBotMove();
 })();
 </script>
 </body>
